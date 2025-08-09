@@ -1,0 +1,242 @@
+use ndarray::Array2;
+use num_complex::Complex;
+use std::path::Path;
+use tracing::info;
+
+use crate::core::processing::pipeline::process_complex_data_pipeline;
+use crate::core::processing::resize::{resize_image_data};
+use crate::core::processing::synthetic_rgb::create_synthetic_rgb;
+use crate::types::{AutoscaleStrategy, BitDepth, OutputFormat, PolarizationOperation, ProcessingOperation};
+use crate::io::writers::jpeg::{write_gray_jpeg, write_rgb_jpeg};
+use crate::io::writers::metadata::{create_jpeg_metadata_sidecar, embed_tiff_metadata};
+use crate::io::writers::tiff::{write_tiff_multiband_u16, write_tiff_multiband_u8, write_tiff_u16, write_tiff_u8};
+
+// resize_image_data moved to crate::core::processing::resize
+
+pub fn save_processed_image(
+    processed: &Array2<Complex<f64>>,
+    output: &Path,
+    format: OutputFormat,
+    bit_depth: BitDepth,
+    target_size: Option<usize>,
+    metadata: Option<&crate::io::sentinel1::SafeMetadata>,
+    pad: bool,
+    strategy: AutoscaleStrategy,
+    operation: ProcessingOperation,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Map operation enum to metadata label when needed
+    let operation_label: Option<String> = match operation {
+        ProcessingOperation::SingleBand => None,
+        ProcessingOperation::MultibandVvVh => Some("multiband_vv_vh".to_string()),
+        ProcessingOperation::MultibandHhHv => Some("multiband_hh_hv".to_string()),
+        ProcessingOperation::PolarOp(PolarizationOperation::Sum) => Some("sum".to_string()),
+        ProcessingOperation::PolarOp(PolarizationOperation::Diff) => Some("difference".to_string()),
+        ProcessingOperation::PolarOp(PolarizationOperation::Ratio) => Some("ratio".to_string()),
+        ProcessingOperation::PolarOp(PolarizationOperation::NDiff) => Some("normalized_diff".to_string()),
+        ProcessingOperation::PolarOp(PolarizationOperation::LogRatio) => Some("log_ratio".to_string()),
+    };
+    match format {
+        OutputFormat::TIFF => {
+            let (db_data, _, scaled_u8, scaled_u16) =
+                process_complex_data_pipeline(processed, bit_depth, strategy);
+            let shape = db_data.dim();
+            let (rows, cols) = shape;
+
+            let (final_cols, final_rows, final_u8, final_u16) = resize_image_data(
+                &scaled_u8,
+                scaled_u16.as_deref(),
+                cols,
+                rows,
+                target_size,
+                bit_depth,
+                pad,
+            )?;
+
+            match bit_depth {
+                BitDepth::U8 => {
+                    let mut ds = write_tiff_u8(output, final_cols, final_rows, &final_u8)?;
+                    if let Some(meta) = metadata {
+                        embed_tiff_metadata(&mut ds, meta, operation_label.as_deref())?;
+                    }
+                    info!("save_processed_image: U8 TIFF saved with metadata");
+                }
+                BitDepth::U16 => {
+                    let mut ds = write_tiff_u16(output, final_cols, final_rows, &final_u16.unwrap())?;
+                    if let Some(meta) = metadata {
+                        embed_tiff_metadata(&mut ds, meta, operation_label.as_deref())?;
+                    }
+                    info!("save_processed_image: U16 TIFF saved with metadata");
+                }
+            }
+        }
+        OutputFormat::JPEG => {
+            let (db_data, _, scaled_u8, _) =
+                process_complex_data_pipeline(processed, BitDepth::U8, strategy);
+            let shape = db_data.dim();
+            let (rows, cols) = shape;
+
+            let (final_cols, final_rows, final_u8, _) = resize_image_data(
+                &scaled_u8,
+                None,
+                cols,
+                rows,
+                target_size,
+                BitDepth::U8,
+                pad,
+            )?;
+
+            write_gray_jpeg(output, final_cols, final_rows, &final_u8)?;
+
+            if let Some(meta) = metadata {
+                create_jpeg_metadata_sidecar(output, meta, operation_label.as_deref())?;
+            }
+
+            info!("save_processed_image: JPEG saved with metadata sidecar");
+        }
+    }
+    Ok(())
+}
+
+pub fn save_processed_multiband_image_sequential(
+    processed1: &Array2<Complex<f64>>,
+    processed2: &Array2<Complex<f64>>,
+    output: &Path,
+    format: OutputFormat,
+    bit_depth: BitDepth,
+    target_size: Option<usize>,
+    metadata: Option<&crate::io::sentinel1::SafeMetadata>,
+    pad: bool,
+    strategy: AutoscaleStrategy,
+    operation: ProcessingOperation,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let operation_label: Option<String> = match operation {
+        ProcessingOperation::SingleBand => None,
+        ProcessingOperation::MultibandVvVh => Some("multiband_vv_vh".to_string()),
+        ProcessingOperation::MultibandHhHv => Some("multiband_hh_hv".to_string()),
+        ProcessingOperation::PolarOp(PolarizationOperation::Sum) => Some("sum".to_string()),
+        ProcessingOperation::PolarOp(PolarizationOperation::Diff) => Some("difference".to_string()),
+        ProcessingOperation::PolarOp(PolarizationOperation::Ratio) => Some("ratio".to_string()),
+        ProcessingOperation::PolarOp(PolarizationOperation::NDiff) => Some("normalized_diff".to_string()),
+        ProcessingOperation::PolarOp(PolarizationOperation::LogRatio) => Some("log_ratio".to_string()),
+    };
+    match format {
+        OutputFormat::TIFF => {
+            let shape = processed1.dim();
+            let (rows, cols) = shape;
+
+            let (db_data, valid_mask, scaled_u8, scaled_u16) =
+                process_complex_data_pipeline(processed1, bit_depth, strategy);
+
+            let (final_cols, final_rows, final_u8, final_u16) = resize_image_data(
+                &scaled_u8,
+                scaled_u16.as_deref(),
+                cols,
+                rows,
+                target_size,
+                bit_depth,
+                pad,
+            )?;
+
+            match bit_depth {
+                BitDepth::U8 => {
+                    drop(db_data);
+                    drop(valid_mask);
+
+                    let (_, _, scaled_u8, _) =
+                        process_complex_data_pipeline(processed2, bit_depth, strategy);
+
+                    let (_, _, final_u8_band2, _) = resize_image_data(
+                        &scaled_u8,
+                        None,
+                        cols,
+                        rows,
+                        target_size,
+                        bit_depth,
+                        pad,
+                    )?;
+
+                    let mut ds = write_tiff_multiband_u8(
+                        output,
+                        final_cols,
+                        final_rows,
+                        &final_u8,
+                        &final_u8_band2,
+                    )?;
+                    if let Some(meta) = metadata {
+                        embed_tiff_metadata(&mut ds, meta, operation_label.as_deref())?;
+                    }
+                    info!("save_processed_multiband_image_sequential: U8 TIFF saved with 2 bands and metadata");
+                }
+                BitDepth::U16 => {
+                    let final_band1 = final_u16.as_ref().unwrap().clone();
+                    drop(db_data);
+                    drop(valid_mask);
+
+                    let (_, _, _, scaled_u16) =
+                        process_complex_data_pipeline(processed2, bit_depth, strategy);
+
+                    let (_, _, _, final_u16) = resize_image_data(
+                        &vec![],
+                        scaled_u16.as_deref(),
+                        cols,
+                        rows,
+                        target_size,
+                        bit_depth,
+                        pad,
+                    )?;
+
+                    let mut ds = write_tiff_multiband_u16(
+                        output,
+                        final_cols,
+                        final_rows,
+                        &final_band1,
+                        final_u16.as_ref().unwrap(),
+                    )?;
+                    if let Some(meta) = metadata {
+                        embed_tiff_metadata(&mut ds, meta, operation_label.as_deref())?;
+                    }
+                    info!("save_processed_multiband_image_sequential: U16 TIFF saved with 2 bands and metadata");
+                }
+            }
+        }
+        OutputFormat::JPEG => {
+            info!("Creating syntetic RGB JPEG from VV | HH (Red) and VH | HV (Green) bands");
+
+            let (db_data, _, scaled_u8, _) =
+                process_complex_data_pipeline(processed1, BitDepth::U8, strategy);
+            let shape = db_data.dim();
+            let (rows, cols) = shape;
+
+            let (final_cols, final_rows, final_u8_band1, _) = resize_image_data(
+                &scaled_u8,
+                None,
+                cols,
+                rows,
+                target_size,
+                BitDepth::U8,
+                pad,
+            )?;
+
+            let (_, _, scaled_u8, _) =
+                process_complex_data_pipeline(processed2, BitDepth::U8, strategy);
+
+            let (_, _, final_u8_band2, _) =
+                resize_image_data(&scaled_u8, None, cols, rows, target_size, BitDepth::U8, pad)?;
+
+            let rgb_data = create_synthetic_rgb(&final_u8_band1, &final_u8_band2);
+
+            write_rgb_jpeg(output, final_cols, final_rows, &rgb_data)?;
+
+            if let Some(meta) = metadata {
+                create_jpeg_metadata_sidecar(output, meta, operation_label.as_deref())?;
+            }
+
+            info!(
+                "Syntetic RGB JPEG saved (VV | HH=Red, VH | HV=Green, VV/VH=Blue) with metadata sidecar"
+            );
+        }
+    }
+    Ok(())
+}
+
+
