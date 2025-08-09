@@ -17,7 +17,7 @@ name = "sarproUI"
 path = "src/bin/gui.rs"
 
 [features]
-default = []
+default = ["gui"]
 gui = ["eframe", "egui_extras", "rfd", "image", "sysinfo", "once_cell"]
 full = ["gui"]
 

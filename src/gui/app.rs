@@ -47,6 +47,10 @@ impl eframe::App for SarproGui {
             install_image_loaders(ctx);
         });
 
+        // Enforce dark mode every frame to avoid OS theme changes taking effect
+        ctx.set_theme(egui::ThemePreference::Dark);
+        ctx.set_visuals(egui::Visuals::dark());
+
         // Set dark theme colors inspired by the attached image
         let mut style = (*ctx.style()).clone();
         style.visuals.override_text_color = Some(egui::Color32::from_gray(220));
