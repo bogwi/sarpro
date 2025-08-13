@@ -361,6 +361,18 @@ println!("processed={}, skipped={}, errors={}", report.processed, report.skipped
 - **Product Types**: Ground Range Detected (GRD)
 - **Output Formats**: GeoTIFF, JPEG
 
+## Roadmap
+
+### Before v1.0.0
+- **Enhanced Color Combinations**: Additional color schemes similar to Copernicus Browser
+- **Tiling Support**: Divide large SAR scenes into smaller tiles for easier processing and ML training
+- **Parallel Workflows**: Multiple independent conversion processes running simultaneously within the same application
+- **Polarimetric Indices**: Complete support for advanced indices including RVI, PR, CPD, and more
+
+### Future Versions
+- **v2.x**: Possible SLC (Single Look Complex) product support
+- **v3.x**: Possible Level-0 RAW support for advanced users
+
 ## Troubleshooting (GDAL)
 
 - If the build fails to find GDAL, ensure `pkg-config` locates it (`pkg-config --libs gdal`) and the environment variables in this README are exported in your shell.
