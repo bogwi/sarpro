@@ -262,13 +262,15 @@ pub fn convert_metadata_to_json(
 pub fn add_special_json_fields(
     json_metadata: &mut HashMap<String, serde_json::Value>,
     meta: &SafeMetadata,
+    geotransform_override: Option<[f64; 6]>,
+    projection_override: Option<&str>,
 ) {
     // Note: The processed polarization field (e.g., "SUM(VV, VH)") is preserved as "polarizations"
     // We don't add any additional polarization fields to avoid conflicts
     // That might or might not change in the future.
 
     // Handle geotransform as array
-    if let Some(geotransform) = meta.geotransform {
+    if let Some(geotransform) = geotransform_override.or(meta.geotransform) {
         json_metadata.insert(
             "geotransform".to_string(),
             serde_json::Value::Array(
@@ -281,8 +283,10 @@ pub fn add_special_json_fields(
     }
 
     // Handle CRS field
-    if let Some(crs) = &meta.crs {
-        json_metadata.insert("crs".to_string(), serde_json::Value::String(crs.clone()));
+    if let Some(crs) = projection_override.or(meta.crs.as_deref()) {
+        if !crs.is_empty() {
+            json_metadata.insert("crs".to_string(), serde_json::Value::String(crs.to_string()));
+        }
     }
 }
 
@@ -291,14 +295,33 @@ pub fn embed_tiff_metadata(
     ds: &mut Dataset,
     meta: &SafeMetadata,
     operation: Option<&str>,
+    geotransform_override: Option<[f64; 6]>,
+    projection_override: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Set georeferencing information
-    if let Some(geotransform) = meta.geotransform {
-        ds.set_geo_transform(&geotransform)?;
+    let is_identity = |gt: [f64; 6]| gt[0] == 0.0 && gt[1] == 1.0 && gt[2] == 0.0 && gt[3] == 0.0 && gt[4] == 0.0 && gt[5] == 1.0;
+
+    // Determine which geotransform to use and whether it's valid
+    let mut set_gt = false;
+    if let Some(gt) = geotransform_override {
+        if !is_identity(gt) {
+            ds.set_geo_transform(&gt)?;
+            set_gt = true;
+        }
+    } else if let Some(gt) = meta.geotransform {
+        if !is_identity(gt) {
+            ds.set_geo_transform(&gt)?;
+            set_gt = true;
+        }
     }
 
-    if let Some(projection) = &meta.projection {
-        ds.set_projection(projection)?;
+    // Only set projection if we also set a non-identity geotransform
+    if set_gt {
+        if let Some(projection) = projection_override.or(meta.projection.as_deref()) {
+            if !projection.is_empty() {
+                ds.set_projection(projection)?;
+            }
+        }
     }
 
     // Extract all metadata fields
@@ -325,7 +348,7 @@ pub fn create_jpeg_metadata_sidecar(
     let mut json_metadata = convert_metadata_to_json(&metadata);
 
     // Add special JSON fields
-    add_special_json_fields(&mut json_metadata, meta);
+    add_special_json_fields(&mut json_metadata, meta, None, None);
 
     // Create sidecar file path
     let sidecar_path = output_path.with_extension("json");
@@ -334,6 +357,24 @@ pub fn create_jpeg_metadata_sidecar(
     let json_string = serde_json::to_string_pretty(&json_metadata)?;
     std::fs::write(&sidecar_path, json_string)?;
 
+    info!("Created JPEG metadata sidecar: {:?}", sidecar_path);
+    Ok(())
+}
+
+/// Create a sidecar metadata file with optional overrides for geotransform/projection
+pub fn create_jpeg_metadata_sidecar_with_overrides(
+    output_path: &Path,
+    meta: &SafeMetadata,
+    operation: Option<&str>,
+    geotransform_override: Option<[f64; 6]>,
+    projection_override: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let metadata = extract_metadata_fields(meta, operation);
+    let mut json_metadata = convert_metadata_to_json(&metadata);
+    add_special_json_fields(&mut json_metadata, meta, geotransform_override, projection_override);
+    let sidecar_path = output_path.with_extension("json");
+    let json_string = serde_json::to_string_pretty(&json_metadata)?;
+    std::fs::write(&sidecar_path, json_string)?;
     info!("Created JPEG metadata sidecar: {:?}", sidecar_path);
     Ok(())
 }
@@ -348,7 +389,7 @@ pub fn handle_metadata(
     match format {
         MetadataFormat::Tiff => {
             let ds = dataset.ok_or("Dataset required for TIFF metadata")?;
-            embed_tiff_metadata(ds, meta, None)
+            embed_tiff_metadata(ds, meta, None, None, None)
         }
         MetadataFormat::Json => create_jpeg_metadata_sidecar(output_path, meta, None),
     }

@@ -72,7 +72,7 @@ pub fn resize_u16_image(
     Ok(resized_u16)
 }
 
-pub fn resize_image_data(
+pub fn resize_image_data_with_meta(
     u8_data: &[u8],
     u16_data: Option<&[u16]>,
     original_cols: usize,
@@ -80,7 +80,19 @@ pub fn resize_image_data(
     target_size: Option<usize>,
     bit_depth: BitDepth,
     pad: bool,
-) -> Result<(usize, usize, Vec<u8>, Option<Vec<u16>>), Box<dyn std::error::Error>> {
+) -> Result<
+    (
+        usize,
+        usize,
+        Vec<u8>,
+        Option<Vec<u16>>,
+        f64, // scale_x
+        f64, // scale_y
+        usize, // pad_left
+        usize, // pad_top
+    ),
+    Box<dyn std::error::Error>,
+> {
     if let Some(size) = target_size {
         info!("Resizing image to {} (long side)", size);
 
@@ -106,6 +118,9 @@ pub fn resize_image_data(
             }
         };
 
+        let scale_x = new_cols as f64 / original_cols as f64;
+        let scale_y = new_rows as f64 / original_rows as f64;
+
         if pad {
             let (padded_u8, padded_u16) = add_padding_to_square(
                 &resized_u8,
@@ -115,26 +130,96 @@ pub fn resize_image_data(
                 bit_depth,
             )?;
             let final_dim = new_cols.max(new_rows);
-            Ok((final_dim, final_dim, padded_u8, padded_u16))
+            let pad_left = (final_dim - new_cols) / 2;
+            let pad_top = (final_dim - new_rows) / 2;
+            Ok((
+                final_dim,
+                final_dim,
+                padded_u8,
+                padded_u16,
+                scale_x,
+                scale_y,
+                pad_left,
+                pad_top,
+            ))
         } else {
-            Ok((new_cols, new_rows, resized_u8, resized_u16))
+            Ok((
+                new_cols,
+                new_rows,
+                resized_u8,
+                resized_u16,
+                scale_x,
+                scale_y,
+                0,
+                0,
+            ))
         }
     } else {
         if pad {
             let (padded_u8, padded_u16) =
                 add_padding_to_square(u8_data, u16_data, original_cols, original_rows, bit_depth)?;
             let final_dim = original_cols.max(original_rows);
-            Ok((final_dim, final_dim, padded_u8, padded_u16))
+            let pad_left = (final_dim - original_cols) / 2;
+            let pad_top = (final_dim - original_rows) / 2;
+            Ok((
+                final_dim,
+                final_dim,
+                padded_u8,
+                padded_u16,
+                1.0,
+                1.0,
+                pad_left,
+                pad_top,
+            ))
         } else {
             match bit_depth {
-                BitDepth::U8 => Ok((original_cols, original_rows, u8_data.to_vec(), None)),
+                BitDepth::U8 => Ok((
+                    original_cols,
+                    original_rows,
+                    u8_data.to_vec(),
+                    None,
+                    1.0,
+                    1.0,
+                    0,
+                    0,
+                )),
                 BitDepth::U16 => {
                     let u16_data = u16_data.ok_or("U16 data required for U16 bit depth")?;
-                    Ok((original_cols, original_rows, vec![], Some(u16_data.to_vec())))
+                    Ok((
+                        original_cols,
+                        original_rows,
+                        vec![],
+                        Some(u16_data.to_vec()),
+                        1.0,
+                        1.0,
+                        0,
+                        0,
+                    ))
                 }
             }
         }
     }
+}
+
+pub fn resize_image_data(
+    u8_data: &[u8],
+    u16_data: Option<&[u16]>,
+    original_cols: usize,
+    original_rows: usize,
+    target_size: Option<usize>,
+    bit_depth: BitDepth,
+    pad: bool,
+) -> Result<(usize, usize, Vec<u8>, Option<Vec<u16>>), Box<dyn std::error::Error>> {
+    let (c, r, u8v, u16v, _sx, _sy, _pl, _pt) = resize_image_data_with_meta(
+        u8_data,
+        u16_data,
+        original_cols,
+        original_rows,
+        target_size,
+        bit_depth,
+        pad,
+    )?;
+    Ok((c, r, u8v, u16v))
 }
 
 

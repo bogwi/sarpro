@@ -65,13 +65,19 @@ impl GdalSarReader {
             Ok(gt) => gt,
             Err(_) => [0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
         };
-        let proj_wkt = dataset.projection();
-        let projection = if proj_wkt.starts_with("EPSG:") {
-            proj_wkt
-        } else if let Some(code) = parse_epsg(&proj_wkt) {
+        let mut proj = dataset.projection();
+        if proj.is_empty() {
+            // Fallback to GCP projection if available
+            if let Some(gcp_proj) = dataset.gcp_projection() {
+                if !gcp_proj.is_empty() { proj = gcp_proj; }
+            }
+        }
+        let projection = if proj.starts_with("EPSG:") {
+            proj
+        } else if let Some(code) = parse_epsg(&proj) {
             code
         } else {
-            proj_wkt
+            proj
         };
         // Collect metadata entries (domain "")
         let mut metadata_map = HashMap::new();
@@ -120,7 +126,7 @@ impl GdalSarReader {
         )?;
         // Convert Buffer into ndarray
         let data_vec = buf.data().to_vec();
-        let mut array =
+        let array =
             Array2::from_shape_vec((self.metadata.size_y, self.metadata.size_x), data_vec)
                 .map_err(|_| {
                     GdalError::DimensionMismatch(
@@ -130,10 +136,6 @@ impl GdalSarReader {
                         self.metadata.size_y,
                     )
                 })?;
-        // Many SAR tools (ESA SNAP, ASF MapReady) flip the image horizontally
-        // regardless of geotransform for Sentinel-1 GRD.
-        // So we always flip horizontally.
-        array.invert_axis(ndarray::Axis(1));
         Ok(array)
     }
 
