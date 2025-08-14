@@ -581,6 +581,10 @@ impl SafeReader {
             if let Some(name) = path.file_name() {
                 let name_str = name.to_string_lossy().to_lowercase();
                 if name_str.ends_with(".tiff") || name_str.ends_with(".tif") {
+                    // Skip any previously warped intermediates to avoid double-processing
+                    if name_str.contains("_warped.tif") || name_str.contains("_warped.tiff") {
+                        continue;
+                    }
                     if name_str.contains("vv") {
                         vv_path = Some(path.clone());
                         info!("Found VV file: {:?}", path);
@@ -684,39 +688,95 @@ impl SafeReader {
         if let Some(dst) = target_crs {
             info!("Warping to target CRS: {}", dst);
             let tmp_in = file_path;
-            // Build a sibling temp output filename
+            // Build a dedicated temp output file path outside SAFE tree
             let stem = file_path
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("warped");
-            let tmp_out = file_path
-                .with_file_name(format!("{}_warped.tif", stem));
+            // Create a unique temporary file using tempfile crate (auto-cleanup fallback)
+            let mut tmp_builder = tempfile::Builder::new();
+            let tmp_file = tmp_builder
+                .prefix(&format!("{}_", stem))
+                .suffix("_warped.tif")
+                .tempfile()
+                .map_err(|e| SafeError::Parse(format!("tempfile error: {}", e)))?;
+            let tmp_out = tmp_file.path().to_path_buf();
             let resample_str = match resample_alg.unwrap_or(ResampleAlg::Bilinear) {
                 ResampleAlg::NearestNeighbour => "near",
                 ResampleAlg::Bilinear => "bilinear",
                 ResampleAlg::Cubic => "cubic",
                 _ => "bilinear",
             };
-            // Determine source CRS from GCP projection if available
+            // Determine source CRS from dataset
             let src_ds = Dataset::open(tmp_in)
                 .map_err(|e| SafeError::Parse(format!("GDAL open error: {}", e)))?;
-            let src_gcp_proj = src_ds.gcp_projection().unwrap_or_else(|| "EPSG:4326".to_string());
+            let ds_proj = src_ds.projection();
+            // Helper: parse EPSG from a WKT string
+            let parse_epsg = |wkt: &str| -> Option<String> {
+                let key = "AUTHORITY[\"EPSG\",\"";
+                if let Some(idx) = wkt.rfind(key) {
+                    let start = idx + key.len();
+                    if let Some(end) = wkt[start..].find('"') {
+                        let code = &wkt[start..start + end];
+                        return Some(format!("EPSG:{}", code));
+                    }
+                }
+                None
+            };
+            // Guard: if dataset already has a projection equal to target, skip warping
+            if !ds_proj.is_empty() {
+                if let Some(epsg) = parse_epsg(&ds_proj).or_else(|| {
+                    if ds_proj.starts_with("EPSG:") { Some(ds_proj.clone()) } else { None }
+                }) {
+                    if epsg.eq_ignore_ascii_case(dst) {
+                        info!("Input already in target CRS ({}); skipping warp", dst);
+                        // Read directly using GDAL reader
+                        let gdal_reader = GdalSarReader::open(file_path)
+                            .map_err(|e| SafeError::Parse(format!("GDAL error: {}", e)))?;
+                        // Update metadata
+                        metadata.geotransform = Some(gdal_reader.metadata.geotransform);
+                        metadata.projection = Some(gdal_reader.metadata.projection.clone());
+                        metadata.crs = Some(gdal_reader.metadata.projection.clone());
+                        let arr_f64 = gdal_reader
+                            .read_band(1, Some(ResampleAlg::NearestNeighbour))
+                            .map_err(|e| SafeError::Parse(format!("GDAL error: {}", e)))?;
+                        let (rows, cols) = (arr_f64.nrows(), arr_f64.ncols());
+                        metadata.lines = rows;
+                        metadata.samples = cols;
+                        let mut data = Array2::<Complex<f64>>::zeros((rows, cols));
+                        for ((i, j), &v) in arr_f64.indexed_iter() {
+                            data[[i, j]] = Complex::new(v, 0.0);
+                        }
+                        return Ok(data);
+                    }
+                }
+            }
+            // Choose warp mode: if dataset has no projection, use GCP+tps with s_srs; otherwise, standard warp
+            let mut args: Vec<String> = vec![
+                "-of".into(), "GTiff".into(),
+                "-overwrite".into(),
+                "-r".into(), resample_str.into(),
+            ];
+            if ds_proj.is_empty() {
+                // Use GCPs via thin plate spline to geolocate Sentinel-1 GRD rasters
+                args.push("-tps".into());
+                // Source SRS from GCP projection (fallback to EPSG:4326)
+                let src_gcp_proj = src_ds.gcp_projection().unwrap_or_else(|| "".to_string());
+                let src_srs = if src_gcp_proj.trim().is_empty() { "EPSG:4326".to_string() } else { src_gcp_proj };
+                args.push("-s_srs".into());
+                args.push(src_srs);
+            }
+            args.push("-t_srs".into());
+            args.push(dst.to_string());
+            args.push(tmp_in.to_str().unwrap().to_string());
+            args.push(tmp_out.to_str().unwrap().to_string());
             let status = Command::new("gdalwarp")
-                .args([
-                    "-of","GTiff",
-                    "-overwrite",
-                    "-r", resample_str,
-                    // Use GCPs via thin plate spline to geolocate Sentinel-1 GRD rasters
-                    "-tps",
-                    // Source SRS provided by GCP projection (typically EPSG:4326)
-                    "-s_srs", &src_gcp_proj,
-                    "-t_srs", dst,
-                    tmp_in.to_str().unwrap(),
-                    tmp_out.to_str().unwrap(),
-                ])
+                .args(args.iter().map(|s| s.as_str()))
                 .status()
                 .map_err(|e| SafeError::Parse(format!("gdalwarp exec error: {}", e)))?;
             if !status.success() {
+                // Best-effort cleanup
+                let _ = std::fs::remove_file(&tmp_out);
                 return Err(SafeError::Parse("gdalwarp failed".to_string()));
             }
             let ds: Dataset = Dataset::open(&tmp_out)
@@ -749,6 +809,8 @@ impl SafeReader {
             // Update dims
             metadata.lines = size_y as usize;
             metadata.samples = size_x as usize;
+            // Clean up temporary warped file
+            let _ = std::fs::remove_file(&tmp_out);
             return Ok(data);
         }
         // Fallback: no warp
