@@ -11,6 +11,9 @@ use tracing::warn;
 
 use crate::io::gdal::GdalSarReader;
 use gdal::raster::ResampleAlg;
+use gdal::raster::Buffer;
+use gdal::Dataset;
+use std::process::Command;
 
 /// Errors encountered when reading SAFE archives
 #[derive(Debug, Error)]
@@ -116,6 +119,16 @@ impl SafeReader {
         safe_dir: P,
         polarization: Option<&str>,
     ) -> Result<Self, SafeError> {
+        Self::open_with_options(safe_dir, polarization, None, None)
+    }
+
+    /// Open and parse a SAFE directory with optional reprojection to target CRS
+    pub fn open_with_options<P: AsRef<Path>>(
+        safe_dir: P,
+        polarization: Option<&str>,
+        target_crs: Option<&str>,
+        resample_alg: Option<ResampleAlg>,
+    ) -> Result<Self, SafeError> {
         let base = safe_dir.as_ref().to_path_buf();
         let annotation = base.join("annotation");
         let measurement = base.join("measurement");
@@ -156,7 +169,12 @@ impl SafeReader {
                 // Load VV data (default)
                 if let Some(path) = vv_path {
                     info!("Loading VV polarization data");
-                    vv_data = Some(Self::load_polarization_data(&path, &mut metadata)?);
+                    vv_data = Some(Self::load_polarization_data_with_options(
+                        &path,
+                        &mut metadata,
+                        target_crs,
+                        resample_alg,
+                    )?);
                 } else {
                     return Err(SafeError::MissingField("VV measurement file"));
                 }
@@ -166,7 +184,12 @@ impl SafeReader {
                 // Load VH data
                 if let Some(path) = vh_path {
                     info!("Loading VH polarization data");
-                    vh_data = Some(Self::load_polarization_data(&path, &mut metadata)?);
+                    vh_data = Some(Self::load_polarization_data_with_options(
+                        &path,
+                        &mut metadata,
+                        target_crs,
+                        resample_alg,
+                    )?);
                 } else {
                     return Err(SafeError::MissingField("VH measurement file"));
                 }
@@ -176,7 +199,12 @@ impl SafeReader {
                 // Load HH data
                 if let Some(path) = hh_path {
                     info!("Loading HH polarization data");
-                    hh_data = Some(Self::load_polarization_data(&path, &mut metadata)?);
+                    hh_data = Some(Self::load_polarization_data_with_options(
+                        &path,
+                        &mut metadata,
+                        target_crs,
+                        resample_alg,
+                    )?);
                 } else {
                     return Err(SafeError::MissingField("HH measurement file"));
                 }
@@ -186,7 +214,12 @@ impl SafeReader {
                 // Load HV data
                 if let Some(path) = hv_path {
                     info!("Loading HV polarization data");
-                    hv_data = Some(Self::load_polarization_data(&path, &mut metadata)?);
+                    hv_data = Some(Self::load_polarization_data_with_options(
+                        &path,
+                        &mut metadata,
+                        target_crs,
+                        resample_alg,
+                    )?);
                 } else {
                     return Err(SafeError::MissingField("HV measurement file"));
                 }
@@ -195,14 +228,24 @@ impl SafeReader {
                 // Load both VV and VH data
                 if let Some(path) = vv_path {
                     info!("Loading VV polarization data");
-                    vv_data = Some(Self::load_polarization_data(&path, &mut metadata)?);
+                    vv_data = Some(Self::load_polarization_data_with_options(
+                        &path,
+                        &mut metadata,
+                        target_crs,
+                        resample_alg,
+                    )?);
                 } else {
                     return Err(SafeError::MissingField("VV measurement file"));
                 }
 
                 if let Some(path) = vh_path {
                     info!("Loading VH polarization data");
-                    vh_data = Some(Self::load_polarization_data(&path, &mut metadata)?);
+                    vh_data = Some(Self::load_polarization_data_with_options(
+                        &path,
+                        &mut metadata,
+                        target_crs,
+                        resample_alg,
+                    )?);
                 } else {
                     return Err(SafeError::MissingField("VH measurement file"));
                 }
@@ -212,14 +255,24 @@ impl SafeReader {
                 // Load both VV and VH data for operations
                 if let Some(path) = vv_path {
                     info!("Loading VV polarization data");
-                    vv_data = Some(Self::load_polarization_data(&path, &mut metadata)?);
+                    vv_data = Some(Self::load_polarization_data_with_options(
+                        &path,
+                        &mut metadata,
+                        target_crs,
+                        resample_alg,
+                    )?);
                 } else {
                     return Err(SafeError::MissingField("VV measurement file"));
                 }
 
                 if let Some(path) = vh_path {
                     info!("Loading VH polarization data");
-                    vh_data = Some(Self::load_polarization_data(&path, &mut metadata)?);
+                    vh_data = Some(Self::load_polarization_data_with_options(
+                        &path,
+                        &mut metadata,
+                        target_crs,
+                        resample_alg,
+                    )?);
                 } else {
                     return Err(SafeError::MissingField("VH measurement file"));
                 }
@@ -229,14 +282,24 @@ impl SafeReader {
                 // Load both HH and HV data for operations
                 if let Some(path) = hh_path {
                     info!("Loading HH polarization data");
-                    hh_data = Some(Self::load_polarization_data(&path, &mut metadata)?);
+                    hh_data = Some(Self::load_polarization_data_with_options(
+                        &path,
+                        &mut metadata,
+                        target_crs,
+                        resample_alg,
+                    )?);
                 } else {
                     return Err(SafeError::MissingField("HH measurement file"));
                 }
 
                 if let Some(path) = hv_path {
                     info!("Loading HV polarization data");
-                    hv_data = Some(Self::load_polarization_data(&path, &mut metadata)?);
+                    hv_data = Some(Self::load_polarization_data_with_options(
+                        &path,
+                        &mut metadata,
+                        target_crs,
+                        resample_alg,
+                    )?);
                 } else {
                     return Err(SafeError::MissingField("HV measurement file"));
                 }
@@ -251,19 +314,39 @@ impl SafeReader {
                 // Load all available polarization data for operations
                 if let Some(path) = vv_path {
                     info!("Loading VV polarization data");
-                    vv_data = Some(Self::load_polarization_data(&path, &mut metadata)?);
+                    vv_data = Some(Self::load_polarization_data_with_options(
+                        &path,
+                        &mut metadata,
+                        target_crs,
+                        resample_alg,
+                    )?);
                 }
                 if let Some(path) = vh_path {
                     info!("Loading VH polarization data");
-                    vh_data = Some(Self::load_polarization_data(&path, &mut metadata)?);
+                    vh_data = Some(Self::load_polarization_data_with_options(
+                        &path,
+                        &mut metadata,
+                        target_crs,
+                        resample_alg,
+                    )?);
                 }
                 if let Some(path) = hh_path {
                     info!("Loading HH polarization data");
-                    hh_data = Some(Self::load_polarization_data(&path, &mut metadata)?);
+                    hh_data = Some(Self::load_polarization_data_with_options(
+                        &path,
+                        &mut metadata,
+                        target_crs,
+                        resample_alg,
+                    )?);
                 }
                 if let Some(path) = hv_path {
                     info!("Loading HV polarization data");
-                    hv_data = Some(Self::load_polarization_data(&path, &mut metadata)?);
+                    hv_data = Some(Self::load_polarization_data_with_options(
+                        &path,
+                        &mut metadata,
+                        target_crs,
+                        resample_alg,
+                    )?);
                 }
             }
             Some(unsupported) => {
@@ -589,6 +672,87 @@ impl SafeReader {
         }
 
         Ok(data)
+    }
+
+    /// Load polarization data with optional warp to target CRS
+    fn load_polarization_data_with_options(
+        file_path: &Path,
+        metadata: &mut SafeMetadata,
+        target_crs: Option<&str>,
+        resample_alg: Option<ResampleAlg>,
+    ) -> Result<Array2<Complex<f64>>, SafeError> {
+        if let Some(dst) = target_crs {
+            info!("Warping to target CRS: {}", dst);
+            let tmp_in = file_path;
+            // Build a sibling temp output filename
+            let stem = file_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("warped");
+            let tmp_out = file_path
+                .with_file_name(format!("{}_warped.tif", stem));
+            let resample_str = match resample_alg.unwrap_or(ResampleAlg::Bilinear) {
+                ResampleAlg::NearestNeighbour => "near",
+                ResampleAlg::Bilinear => "bilinear",
+                ResampleAlg::Cubic => "cubic",
+                _ => "bilinear",
+            };
+            // Determine source CRS from GCP projection if available
+            let src_ds = Dataset::open(tmp_in)
+                .map_err(|e| SafeError::Parse(format!("GDAL open error: {}", e)))?;
+            let src_gcp_proj = src_ds.gcp_projection().unwrap_or_else(|| "EPSG:4326".to_string());
+            let status = Command::new("gdalwarp")
+                .args([
+                    "-of","GTiff",
+                    "-overwrite",
+                    "-r", resample_str,
+                    // Use GCPs via thin plate spline to geolocate Sentinel-1 GRD rasters
+                    "-tps",
+                    // Source SRS provided by GCP projection (typically EPSG:4326)
+                    "-s_srs", &src_gcp_proj,
+                    "-t_srs", dst,
+                    tmp_in.to_str().unwrap(),
+                    tmp_out.to_str().unwrap(),
+                ])
+                .status()
+                .map_err(|e| SafeError::Parse(format!("gdalwarp exec error: {}", e)))?;
+            if !status.success() {
+                return Err(SafeError::Parse("gdalwarp failed".to_string()));
+            }
+            let ds: Dataset = Dataset::open(&tmp_out)
+                .map_err(|e| SafeError::Parse(format!("GDAL open warped error: {}", e)))?;
+
+            // Update metadata from warped dataset
+            if let Ok(gt) = ds.geo_transform() {
+                metadata.geotransform = Some(gt);
+            }
+            let proj = ds.projection();
+            if !proj.is_empty() {
+                metadata.projection = Some(proj.clone());
+                metadata.crs = Some(proj);
+            }
+
+            // Read first band as f64 array
+            let (size_x, size_y) = ds.raster_size();
+            let band = ds.rasterband(1).map_err(|e| SafeError::Parse(format!("GDAL error: {}", e)))?;
+            let buf: Buffer<f64> = band
+                .read_as((0, 0), (size_x, size_y), (size_x, size_y), None)
+                .map_err(|e| SafeError::Parse(format!("GDAL error: {}", e)))?;
+            let data_vec = buf.data().to_vec();
+            let mut data = Array2::<Complex<f64>>::zeros((size_y as usize, size_x as usize));
+            for i in 0..(size_y as usize) {
+                for j in 0..(size_x as usize) {
+                    let v = data_vec[i * (size_x as usize) + j];
+                    data[[i, j]] = Complex::new(v, 0.0);
+                }
+            }
+            // Update dims
+            metadata.lines = size_y as usize;
+            metadata.samples = size_x as usize;
+            return Ok(data);
+        }
+        // Fallback: no warp
+        Self::load_polarization_data(file_path, metadata)
     }
 
     fn parse_comprehensive_metadata(base_path: &Path) -> Result<SafeMetadata, SafeError> {

@@ -15,6 +15,10 @@ pub struct ProcessingParams {
     pub size: Option<usize>,
     /// If true, zero-pad to square after resizing
     pub pad: bool,
+    /// Optional target CRS for map reprojection (e.g., "EPSG:4326", "EPSG:32633")
+    pub target_crs: Option<String>,
+    /// Optional resampling algorithm name (nearest, bilinear, cubic)
+    pub resample_alg: Option<String>,
 }
 
 impl Default for ProcessingParams {
@@ -27,6 +31,8 @@ impl Default for ProcessingParams {
             autoscale: AutoscaleStrategy::Tamed,
             size: None,
             pad: false,
+            target_crs: None,
+            resample_alg: Some("bilinear".to_string()),
         }
     }
 }

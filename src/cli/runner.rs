@@ -5,6 +5,7 @@ use num_complex::Complex;
 use tracing::{info, warn};
 
 use sarpro::io::SafeReader;
+use gdal::raster::ResampleAlg;
 use sarpro::core::processing::save::{save_processed_image, save_processed_multiband_image_sequential};
 use sarpro::types::{OutputFormat, BitDepth, ProcessingOperation};
 use sarpro::{AutoscaleStrategy, BitDepthArg, InputFormat, Polarization, PolarizationOperation};
@@ -23,6 +24,8 @@ fn process_single_file(
     size: &str,
     batch_mode: bool,
     pad: bool,
+    target_crs: Option<&str>,
+    resample_alg: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let polarization_str = match polarization {
         Polarization::Vv => None,
@@ -62,7 +65,19 @@ fn process_single_file(
         }
     } else {
         match input_format {
-            InputFormat::Safe => SafeReader::open(input, polarization_str)?,
+            InputFormat::Safe => {
+                let resample_alg = match resample_alg {
+                    Some("nearest") => Some(ResampleAlg::NearestNeighbour),
+                    Some("bilinear") => Some(ResampleAlg::Bilinear),
+                    Some("cubic") => Some(ResampleAlg::Cubic),
+                    _ => None,
+                };
+                if let Some(tgt) = target_crs {
+                    SafeReader::open_with_options(input, polarization_str, Some(tgt), resample_alg)?
+                } else {
+                    SafeReader::open(input, polarization_str)?
+                }
+            }
         }
     };
 
@@ -270,6 +285,8 @@ pub fn run(args: CliArgs) -> Result<(), Box<dyn std::error::Error>> {
                     &args.size,
                     true,
                     args.pad,
+                    args.target_crs.as_deref(),
+                    args.resample_alg.as_deref(),
                 ) {
                     Ok(()) => {
                         info!("Successfully processed: {:?}\n", path);
@@ -309,6 +326,8 @@ pub fn run(args: CliArgs) -> Result<(), Box<dyn std::error::Error>> {
             &args.size,
             false,
             args.pad,
+            args.target_crs.as_deref(),
+            args.resample_alg.as_deref(),
         )?;
         info!("Successfully processed: {:?} -> {:?}\n", input, output);
     }

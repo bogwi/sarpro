@@ -61,6 +61,14 @@ pub struct CliArgs {
     /// Add padding to make square images (centers image and adds zero padding to top/bottom)
     #[arg(long, default_value_t = false)]
     pub pad: bool,
+
+    /// Optional target CRS for map reprojection (e.g., EPSG:4326, EPSG:32633)
+    #[arg(long)]
+    pub target_crs: Option<String>,
+
+    /// Optional resampling algorithm (nearest, bilinear, cubic)
+    #[arg(long)]
+    pub resample_alg: Option<String>,
 }
 
 
