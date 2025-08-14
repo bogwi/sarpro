@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+### [0.2.1] - 2025-08-14
+
+- **Added**:
+  - Downsampled reading path for SAFE measurements: the reader now supports supplying a target long-side size to read bands directly at the requested output resolution.
+  - New `GdalSarReader::read_band_resampled(out_cols, out_rows, alg)` to leverage GDAL’s resampling during read.
+  - `SafeReader::open_with_options(..., target_size: Option<usize>)` and `open_with_warnings_with_options` to plumb target size from CLI/GUI/Library.
+
+- **Changed**:
+  - When reprojection is requested, `gdalwarp` is invoked with `-ts <cols> <rows>` derived from the target size, producing the final resolution in a single step (no intermediate full-res files, no double resampling).
+  - Non-warp reads call `read_band_resampled` to avoid loading full-resolution arrays when the output is smaller.
+  - `resize_image_data_with_meta` now early-returns when the current long side already matches the requested target size to prevent redundant resizes.
+
+- **Performance**:
+  - End-to-end speedups up to ~10x for small target sizes (e.g., 512), primarily by cutting disk I/O and memory traffic and avoiding extra resampling passes.
+  - Lower peak memory usage when processing very large scenes.
+
+- **Compatibility**:
+  - API remains source-compatible; added optional `target_size` parameter to existing open functions without breaking previous call sites. CLI/GUI and Library routes forward `--size`/`size` to the reader.
+
 ### [0.2.0] - Unreleased
 
 - **Added**:

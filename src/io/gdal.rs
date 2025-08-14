@@ -140,6 +140,42 @@ impl GdalSarReader {
         Ok(array)
     }
 
+    /// Read a single band resampled to a target shape (out_cols, out_rows)
+    /// Uses GDAL's internal resampling to produce the requested output shape in one pass
+    pub fn read_band_resampled(
+        &self,
+        index: usize,
+        out_cols: usize,
+        out_rows: usize,
+        e_resample_alg: Option<ResampleAlg>,
+    ) -> Result<Array2<f64>, GdalError> {
+        if index == 0 || index > self.metadata.bands {
+            return Err(GdalError::UnsupportedFormat(format!(
+                "Band index {} out of range",
+                index
+            )));
+        }
+        let band = self.dataset.rasterband(index)?;
+        let window = (self.metadata.size_x, self.metadata.size_y);
+        let shape = (out_cols, out_rows);
+        let buf = band.read_as::<f64>(
+            (0, 0),
+            window,         // full window
+            shape,          // desired output shape
+            e_resample_alg, // resampling algorithm
+        )?;
+        let data_vec = buf.data().to_vec();
+        let array = Array2::from_shape_vec((out_rows, out_cols), data_vec).map_err(|_| {
+            GdalError::DimensionMismatch(
+                self.metadata.size_x,
+                self.metadata.size_y,
+                out_cols,
+                out_rows,
+            )
+        })?;
+        Ok(array)
+    }
+
     /// Read all bands into a vector of f64 ndarrays
     pub fn _read_all_bands(&self) -> Result<Vec<Array2<f64>>, GdalError> {
         let mut result = Vec::with_capacity(self.metadata.bands);

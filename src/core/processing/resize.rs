@@ -95,6 +95,38 @@ pub fn resize_image_data_with_meta(
 > {
     if let Some(size) = target_size {
         info!("Resizing image to {} (long side)", size);
+        // If already at requested long side, skip resizing
+        let current_long = original_cols.max(original_rows);
+        if current_long == size {
+            let scale_x = 1.0;
+            let scale_y = 1.0;
+            if pad {
+                let (padded_u8, padded_u16) = add_padding_to_square(
+                    u8_data,
+                    u16_data,
+                    original_cols,
+                    original_rows,
+                    bit_depth,
+                )?;
+                let final_dim = original_cols.max(original_rows);
+                let pad_left = (final_dim - original_cols) / 2;
+                let pad_top = (final_dim - original_rows) / 2;
+                return Ok((
+                    final_dim, final_dim, padded_u8, padded_u16, scale_x, scale_y, pad_left, pad_top,
+                ));
+            } else {
+                return Ok((
+                    original_cols,
+                    original_rows,
+                    match bit_depth { BitDepth::U8 => u8_data.to_vec(), BitDepth::U16 => vec![] },
+                    match bit_depth { BitDepth::U16 => u16_data.map(|v| v.to_vec()), BitDepth::U8 => None },
+                    scale_x,
+                    scale_y,
+                    0,
+                    0,
+                ));
+            }
+        }
 
         let (new_cols, new_rows) = calculate_resize_dimensions(original_cols, original_rows, size);
 

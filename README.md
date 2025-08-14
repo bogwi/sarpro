@@ -31,8 +31,8 @@ Till the project in not version 1.0.0, always visit [CHANGELOG.md](CHANGELOG.md)
 
 SARPRO is optimized for bulk processing with exceptional performance:
 
-- **Performance**: Processing a dual-band 400MP SAR GRD product image and scaling it to 4MP (2048x2048) synthetic RGB JPEG with padding and reprojection takes approximately **60 seconds** on a modern laptop with Tamed db autoscale strategy. Setting reprojection to `none` will reduce the time to **30 seconds**. Expect 10x performance improvement in the cloud.
-- **CPU vs I/O**: Debug and release builds show negligible performance differences even on the latest Apple Silicon laptops, indicating that your performance will typically be **limited by I/O, not CPU**
+- **Performance**: Starting from v0.2.1 dramatic optimizations were made to the processing pipeline which you can see in the [CHANGELOG](CHANGELOG.md). Now processing a dual-band 400MP SAR GRD product image and scaling it to 4MP (2048x2048) synthetic RGB JPEG with padding and reprojection takes approximately **~6 seconds** on a modern laptop (Apple M4Pro12) with Tamed db autoscale strategy and cubic resampling. Setting reprojection to `none` will reduce the time to **~3 seconds**. And you might as well expect N x performance improvement in the cloud. Warping to the native resolution same dual-band 400MP SAR GRD product takes x 12-14 or around **80 seconds**. Non warping on the same product peaks around **30 seconds**.
+- **CPU vs I/O**: Debug and release builds show negligible performance differences on the latest Apple Silicon laptops, indicating that your performance will typically be **limited by I/O, not CPU**
 - **Scalability**: Run multiple SARPRO or SARPRO UI instances in parallel — limited only by your system’s resources — to handle different workflows simultaneously.
 - **Memory Usage**: The memory impact is staged sequentially.
 - **Error Resilience**: The CLI and UI versions are made Error SAFE, which means it will not crash on errors (like no data available or data is corrupted, or wrong GRD product) no matter what.

@@ -72,7 +72,13 @@ pub fn process_safe_to_buffer(
     pad: bool,
     output_format: OutputFormat,
 ) -> Result<ProcessedImage> {
-    let reader = SafeReader::open(input, pol_to_reader_hint(&polarization))?;
+    let reader = SafeReader::open_with_options(
+        input,
+        pol_to_reader_hint(&polarization),
+        None,
+        None,
+        target_size,
+    )?;
 
     match (output_format, polarization) {
         // Single-band TIFF (U8/U16)
@@ -396,7 +402,13 @@ pub fn process_directory_to_path(
     let mut iter = iterate_safe_products(input_dir)?;
     while let Some(path) = iter.next() {
         // Early viability check to allow skipping unsupported product types
-        match SafeReader::open_with_warnings(&path, pol_to_reader_hint(&params.polarization))? {
+        match SafeReader::open_with_warnings_with_options(
+            &path,
+            pol_to_reader_hint(&params.polarization),
+            None,
+            None,
+            params.size,
+        )? {
             Some(_) => {
                 // Determine output file name
                 let safe_name = path.file_name().unwrap().to_string_lossy();
@@ -431,7 +443,13 @@ pub fn process_safe_to_path(input: &Path, output: &Path, params: &ProcessingPara
     let bit_depth = bitdepth_arg_to_bitdepth(params.bit_depth);
 
     // Open reader according to polarization
-    let reader = SafeReader::open(input, pol_to_reader_hint(&params.polarization))?;
+    let reader = SafeReader::open_with_options(
+        input,
+        pol_to_reader_hint(&params.polarization),
+        None,
+        None,
+        params.size,
+    )?;
 
     match params.polarization {
         Polarization::Vv | Polarization::Vh | Polarization::Hh | Polarization::Hv => {
@@ -551,7 +569,13 @@ pub fn process_safe_with_options(
     size: Option<usize>,
     pad: bool,
 ) -> Result<()> {
-    let reader = SafeReader::open(input, pol_to_reader_hint(&polarization))?;
+    let reader = SafeReader::open_with_options(
+        input,
+        pol_to_reader_hint(&polarization),
+        None,
+        None,
+        size,
+    )?;
 
     match polarization {
         Polarization::Vv | Polarization::Vh | Polarization::Hh | Polarization::Hv => {
@@ -727,7 +751,7 @@ pub fn load_polarization(
         _ => {}
     }
 
-    let reader = SafeReader::open(input, pol_to_reader_hint(&pol))?;
+    let reader = SafeReader::open_with_options(input, pol_to_reader_hint(&pol), None, None, None)?;
     let data = match pol {
         Polarization::Vv => reader.vv_data()?,
         Polarization::Vh => reader.vh_data()?,
@@ -743,7 +767,7 @@ pub fn load_operation(
     input: &Path,
     op: PolarizationOperation,
 ) -> Result<(Array2<Complex<f64>>, SafeMetadata)> {
-    let reader = SafeReader::open(input, Some("all_pairs"))?;
+    let reader = SafeReader::open_with_options(input, Some("all_pairs"), None, None, None)?;
 
     // Prefer VV/VH if both available, otherwise HH/HV
     if reader.vv_data().is_ok() && reader.vh_data().is_ok() {

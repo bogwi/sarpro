@@ -198,7 +198,13 @@ impl SarproGui {
             match input_format {
                 InputFormat::Safe => {
                     trace!("Opening SAFE file in batch mode: {:?}", input);
-                    match SafeReader::open_with_warnings(input, polarization_str)? {
+                    match SafeReader::open_with_warnings_with_options(
+                        input,
+                        polarization_str,
+                        None,
+                        None,
+                        target_size,
+                    )? {
                         Some(reader) => {
                             debug!("Successfully opened SAFE file in batch mode");
                             reader
@@ -227,16 +233,13 @@ impl SarproGui {
                     } else {
                         Some(trimmed.as_str())
                     };
-                    let reader = if let Some(tgt_crs) = tgt_opt {
-                        SafeReader::open_with_options(
-                            input,
-                            polarization_str,
-                            Some(tgt_crs),
-                            resample,
-                        )?
-                    } else {
-                        SafeReader::open(input, polarization_str)?
-                    };
+                    let reader = SafeReader::open_with_options(
+                        input,
+                        polarization_str,
+                        tgt_opt,
+                        resample,
+                        target_size,
+                    )?;
                     debug!("Successfully opened SAFE file in single mode");
                     reader
                 }

@@ -55,7 +55,13 @@ fn process_single_file(
 
     let reader = if batch_mode {
         match input_format {
-            InputFormat::Safe => match SafeReader::open_with_warnings(input, polarization_str)? {
+            InputFormat::Safe => match SafeReader::open_with_warnings_with_options(
+                input,
+                polarization_str,
+                None,
+                None,
+                target_size,
+            )? {
                 Some(reader) => reader,
                 None => {
                     warn!("Skipping unsupported product type: {:?}", input);
@@ -74,18 +80,31 @@ fn process_single_file(
                 };
                 if let Some(tgt) = target_crs {
                     if tgt.eq_ignore_ascii_case("none") {
-                        // Explicitly disable reprojection
-                        SafeReader::open(input, polarization_str)?
+                        // Explicitly disable reprojection but allow target-size downsample
+                        SafeReader::open_with_options(
+                            input,
+                            polarization_str,
+                            None,
+                            resample_alg,
+                            target_size,
+                        )?
                     } else {
                         SafeReader::open_with_options(
                             input,
                             polarization_str,
                             Some(tgt),
                             resample_alg,
+                            target_size,
                         )?
                     }
                 } else {
-                    SafeReader::open(input, polarization_str)?
+                    SafeReader::open_with_options(
+                        input,
+                        polarization_str,
+                        None,
+                        resample_alg,
+                        target_size,
+                    )?
                 }
             }
         }
