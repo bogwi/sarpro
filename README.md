@@ -5,14 +5,14 @@ A high-performance Sentinel-1 Synthetic Aperture Radar (SAR) GRD product to imag
 ## Features
 - **Sentinel-1 Support**: Specialized for Sentinel-1 SAR GRD products
 - **Multiple Interfaces**: CLI, GUI, and library APIs
-- **Blazing Fast Performance**: Process dual-band 400MP GRD product images and scale to 4MP (2048x2048) synthetic RGB JPEG in ~30 seconds on modern laptops
+- **Blazing Fast Performance**: Process dual-band 400MP GRD product images and scale to 4MP (2048x2048) synthetic RGB JPEG with reprojection and padding in just ~1.5 seconds on modern laptops (since v0.2.1, see [CHANGELOG](CHANGELOG.md) for performance details) **THIS IS NOT A TYPO OR JOKE**
 - **Flexible Polarization**: Support for VV, VH, HH, HV, multiband, and polarization operations (sum, difference, ratio, etc.)
 - **Advanced Autoscaling**: Multiple strategies including standard, robust, adaptive, and equalized
 - **Batch Processing**: Process multiple SAFE directories efficiently for ML workflows
 - **Output Formats**: TIFF and JPEG support with configurable bit depths
 - **Memory Efficient**: Optimized for processing large SAR datasets
 - **I/O Optimized**: Performance typically limited by disk I/O, not CPU processing
-- **since v0.2.0**: Can now reproject to any CRS and resample with nearest, bilinear, or cubic algorithms
+- **since v0.2.0 (unreleased)**: Can now reproject to any CRS and resample with nearest, bilinear, or cubic algorithms
 
 ## CHANGELOG IS FIRST THING TO READ
 Till the project in not version 1.0.0, always visit [CHANGELOG.md](CHANGELOG.md) for the full changelog. *The updating aims to be complementary and not breaking were possible, yet the API is still experimental and may evolve. GUI most likely will be the first to be updated with new features and improvements.*
@@ -31,11 +31,22 @@ Till the project in not version 1.0.0, always visit [CHANGELOG.md](CHANGELOG.md)
 
 SARPRO is optimized for bulk processing with exceptional performance:
 
-- **Performance**: Starting from v0.2.1 dramatic optimizations were made to the processing pipeline which you can see in the [CHANGELOG](CHANGELOG.md). Now processing a dual-band 400MP SAR GRD product image and scaling it to 4MP (2048x2048) synthetic RGB JPEG with padding and reprojection takes approximately **~6 seconds** on a modern laptop (Apple M4Pro12) with Tamed db autoscale strategy and cubic resampling. Setting reprojection to `none` will reduce the time to **~3 seconds**. And you might as well expect N x performance improvement in the cloud. Warping to the native resolution same dual-band 400MP SAR GRD product takes x 12-14 or around **80 seconds**. Non warping on the same product peaks around **30 seconds**.
+- **Performance**: Starting from v0.2.1 dramatic optimizations were made to the processing pipeline which you can see in the [CHANGELOG](CHANGELOG.md). Now processing a dual-band 400MP SAR GRD product image and scaling it to 4MP (2048x2048) synthetic RGB JPEG with padding and reprojection takes approximately **~1.5 seconds** on a modern laptop (Apple M4Pro12) with Tamed db autoscale strategy and cubic resampling. Setting reprojection to `none` will reduce the time to **~348.21 ms**. And you might as well expect N x performance improvement in the cloud. Warping to the native resolution same dual-band 400MP SAR GRD product and into synthetic RGB JPEG takes x 12-14 or around **55 seconds**. Non warping on the same product peaks around **40 seconds**.
 - **CPU vs I/O**: Debug and release builds show negligible performance differences on the latest Apple Silicon laptops, indicating that your performance will typically be **limited by I/O, not CPU**
 - **Scalability**: Run multiple SARPRO or SARPRO UI instances in parallel — limited only by your system’s resources — to handle different workflows simultaneously.
 - **Memory Usage**: The memory impact is staged sequentially.
 - **Error Resilience**: The CLI and UI versions are made Error SAFE, which means it will not crash on errors (like no data available or data is corrupted, or wrong GRD product) no matter what.
+
+#### Mount Fuji synthetic RGB crop example from the full 26544 × 26544px resolution processed by SARPRO in 50 seconds. Data: [dataspace.copernicus.eu](https://dataspace.copernicus.eu/) 
+```Summary
+Name: S1A_IW_GRDH_1SDV_20250706T204346_20250706T204411_059968_07730F_F70D.SAFE
+Size: 1893MB
+Sensing time: 2025-07-06T20:39:57.839576
+Platform short name: SENTINEL-1
+Instrument short name: SAR
+```
+
+![Mount Fuji crop example](src/assets/S1A_IW_GRDH_1SDV_20250706T204346_20250706T204411_059968_07730F_F70D.SAFE_mt.Fuji.jpg)
 
 ### Recommended Workflows
 
@@ -212,7 +223,7 @@ The GUI is the easiest way to get started with SARPRO locally.
 
 ![SARPRO GUI](src/assets/sarprogui.png)
 
-#### Render example of Sentinel-1 SAR GRD product downloaded from [dataspace.copernicus.eu](https://dataspace.copernicus.eu/). The 25192 × 19614px (~500MP) reprojected, dual-band image scaled and padded to 3024px on the long side and carrying metadata took just ~80 seconds on Apple M4Pro with CPU < 22% usage. 
+#### Render example of Sentinel-1 SAR GRD product downloaded from [dataspace.copernicus.eu](https://dataspace.copernicus.eu/). The 25192 × 19614px (~500MP) reprojected, dual-band image scaled and padded to 3024px on the long side and carrying metadata took just ~2 seconds on Apple M4Pro12 with minimal CPU usage. (see [CHANGELOG](CHANGELOG.md) from v0.2.1 for performance details). Warping it at 25192 × 19614px, and autocaling, padding and into synthetic RGB JPEG takes around 70 seconds.
 ```Summary
 Name: S1C_IW_GRDH_1SDV_20250730T142348_20250730T142417_003451_006EEA_895D.SAFE
 Size: 1893MB

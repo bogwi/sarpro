@@ -912,7 +912,7 @@ impl SafeReader {
             let mut tmp_builder = tempfile::Builder::new();
             let tmp_file = tmp_builder
                 .prefix(&format!("{}_", stem))
-                .suffix("_warped.tif")
+                .suffix("_warped.vrt")
                 .tempfile()
                 .map_err(|e| SafeError::Parse(format!("tempfile error: {}", e)))?;
             let tmp_out = tmp_file.path().to_path_buf();
@@ -973,10 +973,19 @@ impl SafeReader {
             // Choose warp mode: if dataset has no projection, use GCP+tps with s_srs; otherwise, standard warp
             let mut args: Vec<String> = vec![
                 "-of".into(),
-                "GTiff".into(),
+                "VRT".into(),
                 "-overwrite".into(),
                 "-r".into(),
                 resample_str.into(),
+                // Performance knobs
+                "-multi".into(),
+                "-wo".into(),
+                "NUM_THREADS=ALL_CPUS".into(),
+                "-wm".into(),
+                "512".into(),
+                "--config".into(),
+                "GDAL_CACHEMAX".into(),
+                "512".into(),
             ];
             // If a target image long side is provided, compute output cols/rows preserving aspect
             if let Some(ts) = target_size {
@@ -1049,7 +1058,7 @@ impl SafeReader {
             // Update dims
             metadata.lines = size_y as usize;
             metadata.samples = size_x as usize;
-            // Clean up temporary warped file
+            // Clean up temporary VRT file (small)
             let _ = std::fs::remove_file(&tmp_out);
             return Ok(data);
         }

@@ -4,7 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
-### [0.2.1] - 2025-08-14
+### [0.2.2] - 2025-08-14 (unreleased)
+
+- **Changed**:
+  - Reprojection now writes a lightweight VRT instead of a temporary GeoTIFF. We invoke `gdalwarp` with `-of VRT` and open the VRT directly, eliminating large intermediate files and further reducing disk I/O and latency.
+  - Kept single-pass resampling by continuing to pass `-ts <cols> <rows>` when a target size is provided.
+  - Tuned warp performance flags: `-multi -wo NUM_THREADS=ALL_CPUS -wm 512 --config GDAL_CACHEMAX 512`.
+
+- **Performance**:
+  - Noticeably lower I/O during reprojection; faster end-to-end with `--target-crs` due to removing the large temporary GeoTIFF and reading via VRT.
+
+- **Compatibility**:
+  - No API changes. Behavior identical except for improved performance and reduced temporary disk usage.
+
+### [0.2.1] - 2025-08-14 (unreleased)
 
 - **Added**:
   - Downsampled reading path for SAFE measurements: the reader now supports supplying a target long-side size to read bands directly at the requested output resolution.
