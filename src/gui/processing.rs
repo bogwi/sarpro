@@ -214,7 +214,23 @@ impl SarproGui {
             match input_format {
                 InputFormat::Safe => {
                     trace!("Opening SAFE file in single mode: {:?}", input);
-                    let reader = SafeReader::open(input, polarization_str)?;
+                    // Map resample algorithm string to GDAL enum
+                    let resample = match self.resample_alg.trim().to_lowercase().as_str() {
+                        "nearest" => Some(gdal::raster::ResampleAlg::NearestNeighbour),
+                        "cubic" => Some(gdal::raster::ResampleAlg::Cubic),
+                        _ => Some(gdal::raster::ResampleAlg::Bilinear),
+                    };
+                    // Use target CRS if provided (default from GUI is EPSG:32630)
+                    let tgt = if self.target_crs.trim().is_empty() {
+                        None
+                    } else {
+                        Some(self.target_crs.trim())
+                    };
+                    let reader = if let Some(tgt_crs) = tgt {
+                        SafeReader::open_with_options(input, polarization_str, Some(tgt_crs), resample)?
+                    } else {
+                        SafeReader::open(input, polarization_str)?
+                    };
                     debug!("Successfully opened SAFE file in single mode");
                     reader
                 }
@@ -447,6 +463,8 @@ impl SarproGui {
         debug!("  Padding: {}", pad);
 
         // Spawn background thread for processing
+        let target_crs = self.target_crs.clone();
+        let resample_alg = self.resample_alg.clone();
         std::thread::spawn(move || {
             // Always set up tracing subscriber for this thread so error messages appear in GUI
             let subscriber = Registry::default().with(GuiLogLayer::new());
@@ -463,6 +481,8 @@ impl SarproGui {
                 bit_depth,
                 polarization,
                 autoscale,   // Use the actual autoscale strategy from GUI
+                target_crs,
+                resample_alg,
                 size_mode,   // <-- FIX: use actual size_mode
                 custom_size, // <-- FIX: use actual custom_size
                 enable_logging: log_enabled,

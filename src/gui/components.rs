@@ -433,6 +433,52 @@ impl OptionsComponent {
                     .color(Color32::from_gray(120))
                     .size(11.0)
             );
+
+            ui.add_space(12.0);
+
+            // Target CRS option
+            ui.horizontal(|ui| {
+                ui.label("Target CRS:");
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    // simple editable text field for EPSG or WKT; default EPSG:32630
+                    let response = ui.text_edit_singleline(&mut app.target_crs);
+                    if response.changed() && app.target_crs.trim().is_empty() {
+                        app.target_crs = "EPSG:32630".to_string();
+                    }
+                });
+            });
+            ui.label(
+                RichText::new("Map projection to reproject into (e.g., EPSG:4326, EPSG:32633). Default: EPSG:32630.")
+                    .color(Color32::from_gray(120))
+                    .size(11.0)
+            );
+
+            ui.add_space(8.0);
+
+            // Resample algorithm option
+            ui.horizontal(|ui| {
+                ui.label("Resample:");
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ComboBox::from_id_salt("resample_alg")
+                        .selected_text(app.resample_alg.to_string())
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut app.resample_alg, "nearest".to_string(), "nearest");
+                            ui.selectable_value(&mut app.resample_alg, "bilinear".to_string(), "bilinear");
+                            ui.selectable_value(&mut app.resample_alg, "cubic".to_string(), "cubic");
+                        });
+                });
+            });
+            let resample_info = match app.resample_alg.as_str() {
+                "nearest" => "Nearest neighbor resampling. Fastest but least accurate.",
+                "bilinear" => "Bilinear resampling. Good balance of speed and accuracy. Default.",
+                "cubic" => "Cubic resampling. Best quality but slowest.",
+                _ => "Unknown resampling algorithm.",
+            };
+            ui.label(
+                RichText::new(resample_info)
+                    .color(Color32::from_gray(120))
+                    .size(11.0)
+            );
         });
     }
 }

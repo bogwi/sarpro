@@ -49,6 +49,10 @@ pub struct SarproGui {
     pub polarization: Polarization,
     pub autoscale: AutoscaleStrategy,
 
+    // Reprojection parameters
+    pub target_crs: String,
+    pub resample_alg: String,
+
     // Size parameters
     pub size_mode: SizeMode,
     pub custom_size: String,
@@ -91,6 +95,8 @@ impl Default for SarproGui {
             bit_depth: BitDepth::U8,
             polarization: Polarization::Vv,
             autoscale: AutoscaleStrategy::Tamed,
+            target_crs: "EPSG:32630".to_string(),
+            resample_alg: "bilinear".to_string(),
             size_mode: SizeMode::Original,
             custom_size: String::new(),
             enable_logging: false,
@@ -205,6 +211,8 @@ impl SarproGui {
             bit_depth: BitDepth,
             polarization: Polarization,
             autoscale: AutoscaleStrategy,
+            target_crs: String,
+            resample_alg: String,
             size_mode: SizeMode,
             custom_size: String,
             batch_mode: bool,
@@ -218,6 +226,8 @@ impl SarproGui {
             bit_depth: self.bit_depth,
             polarization: self.polarization,
             autoscale: self.autoscale,
+            target_crs: self.target_crs.clone(),
+            resample_alg: self.resample_alg.clone(),
             size_mode: self.size_mode,
             custom_size: self.custom_size.clone(),
             batch_mode: self.batch_mode,
@@ -281,6 +291,8 @@ impl SarproGui {
                 bit_depth: BitDepth,
                 polarization: Polarization,
                 autoscale: AutoscaleStrategy,
+                target_crs: String,
+                resample_alg: String,
                 size_mode: SizeMode,
                 custom_size: String,
                 batch_mode: bool,
@@ -306,6 +318,8 @@ impl SarproGui {
             self.bit_depth = preset.bit_depth;
             self.polarization = preset.polarization;
             self.autoscale = preset.autoscale;
+            self.target_crs = preset.target_crs;
+            self.resample_alg = preset.resample_alg;
             self.size_mode = preset.size_mode;
             self.custom_size = preset.custom_size;
             self.batch_mode = preset.batch_mode;
@@ -366,6 +380,14 @@ impl SarproGui {
             AutoscaleStrategy::Default => "default",
         };
         cmd.push_str(&format!(" --autoscale {}", autoscale_cli));
+
+        // Add reprojection options
+        if !self.target_crs.trim().is_empty() {
+            cmd.push_str(&format!(" --target-crs {}", self.target_crs.trim()));
+        }
+        if !self.resample_alg.trim().is_empty() {
+            cmd.push_str(&format!(" --resample-alg {}", self.resample_alg.trim()));
+        }
 
         // Add size parameter
         let size_str = match self.size_mode {
