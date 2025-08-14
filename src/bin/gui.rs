@@ -31,8 +31,7 @@ fn main() -> Result<(), eframe::Error> {
         options,
         Box::new(|cc| {
             // Enforce dark theme globally regardless of OS theme
-            cc.egui_ctx
-                .set_theme(eframe::egui::ThemePreference::Dark);
+            cc.egui_ctx.set_theme(eframe::egui::ThemePreference::Dark);
             cc.egui_ctx.set_visuals(eframe::egui::Visuals::dark());
 
             Ok(Box::new(SarproGui::default()))

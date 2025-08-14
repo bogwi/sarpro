@@ -54,9 +54,9 @@ pub struct ProcessedImage {
     pub height: usize,
     pub bit_depth: BitDepth,
     pub format: OutputFormat,
-    pub gray: Option<Vec<u8>>,      // single-band U8
-    pub gray16: Option<Vec<u16>>,   // single-band U16
-    pub rgb: Option<Vec<u8>>,       // interleaved RGB (for JPEG synthetic RGB)
+    pub gray: Option<Vec<u8>>,          // single-band U8
+    pub gray16: Option<Vec<u16>>,       // single-band U16
+    pub rgb: Option<Vec<u8>>,           // interleaved RGB (for JPEG synthetic RGB)
     pub gray_band2: Option<Vec<u8>>,    // multiband second band U8
     pub gray16_band2: Option<Vec<u16>>, // multiband second band U16
     pub metadata: SafeMetadata,
@@ -76,7 +76,10 @@ pub fn process_safe_to_buffer(
 
     match (output_format, polarization) {
         // Single-band TIFF (U8/U16)
-        (OutputFormat::TIFF, Polarization::Vv | Polarization::Vh | Polarization::Hh | Polarization::Hv) => {
+        (
+            OutputFormat::TIFF,
+            Polarization::Vv | Polarization::Vh | Polarization::Hh | Polarization::Hv,
+        ) => {
             let processed = match polarization {
                 Polarization::Vv => reader.vv_data()?,
                 Polarization::Vh => reader.vh_data()?,
@@ -96,15 +99,24 @@ pub fn process_safe_to_buffer(
                 target_size,
                 bit_depth,
                 pad,
-            ).map_err(|e| Error::external(e))?;
+            )
+            .map_err(|e| Error::external(e))?;
 
             Ok(ProcessedImage {
                 width: final_cols,
                 height: final_rows,
                 bit_depth,
                 format: OutputFormat::TIFF,
-                gray: if matches!(bit_depth, BitDepth::U8) { Some(final_u8) } else { None },
-                gray16: if matches!(bit_depth, BitDepth::U16) { final_u16 } else { None },
+                gray: if matches!(bit_depth, BitDepth::U8) {
+                    Some(final_u8)
+                } else {
+                    None
+                },
+                gray16: if matches!(bit_depth, BitDepth::U16) {
+                    final_u16
+                } else {
+                    None
+                },
                 rgb: None,
                 gray_band2: None,
                 gray16_band2: None,
@@ -125,7 +137,8 @@ pub fn process_safe_to_buffer(
                 )));
             };
 
-            let (db1, _m1, s1_u8, s1_u16) = process_complex_data_pipeline(&band1, bit_depth, autoscale);
+            let (db1, _m1, s1_u8, s1_u16) =
+                process_complex_data_pipeline(&band1, bit_depth, autoscale);
             let (rows, cols) = db1.dim();
             let (final_cols, final_rows, final1_u8, final1_u16) = resize_image_data(
                 &s1_u8,
@@ -135,9 +148,11 @@ pub fn process_safe_to_buffer(
                 target_size,
                 bit_depth,
                 pad,
-            ).map_err(|e| Error::external(e))?;
+            )
+            .map_err(|e| Error::external(e))?;
 
-            let (_db2, _m2, s2_u8, s2_u16) = process_complex_data_pipeline(&band2, bit_depth, autoscale);
+            let (_db2, _m2, s2_u8, s2_u16) =
+                process_complex_data_pipeline(&band2, bit_depth, autoscale);
             let (_c2, _r2, final2_u8, final2_u16) = resize_image_data(
                 &s2_u8,
                 s2_u16.as_deref(),
@@ -146,18 +161,35 @@ pub fn process_safe_to_buffer(
                 target_size,
                 bit_depth,
                 pad,
-            ).map_err(|e| Error::external(e))?;
+            )
+            .map_err(|e| Error::external(e))?;
 
             Ok(ProcessedImage {
                 width: final_cols,
                 height: final_rows,
                 bit_depth,
                 format: OutputFormat::TIFF,
-                gray: if matches!(bit_depth, BitDepth::U8) { Some(final1_u8) } else { None },
-                gray16: if matches!(bit_depth, BitDepth::U16) { final1_u16.clone() } else { None },
+                gray: if matches!(bit_depth, BitDepth::U8) {
+                    Some(final1_u8)
+                } else {
+                    None
+                },
+                gray16: if matches!(bit_depth, BitDepth::U16) {
+                    final1_u16.clone()
+                } else {
+                    None
+                },
                 rgb: None,
-                gray_band2: if matches!(bit_depth, BitDepth::U8) { Some(final2_u8) } else { None },
-                gray16_band2: if matches!(bit_depth, BitDepth::U16) { final2_u16 } else { None },
+                gray_band2: if matches!(bit_depth, BitDepth::U8) {
+                    Some(final2_u8)
+                } else {
+                    None
+                },
+                gray16_band2: if matches!(bit_depth, BitDepth::U16) {
+                    final2_u16
+                } else {
+                    None
+                },
                 metadata: reader.metadata.clone(),
             })
         }
@@ -178,27 +210,15 @@ pub fn process_safe_to_buffer(
             let (db1, _m1, s1_u8, _s1_u16) =
                 process_complex_data_pipeline(&band1, BitDepth::U8, autoscale);
             let (rows, cols) = db1.dim();
-            let (final_cols, final_rows, final1_u8, _) = resize_image_data(
-                &s1_u8,
-                None,
-                cols,
-                rows,
-                target_size,
-                BitDepth::U8,
-                pad,
-            ).map_err(|e| Error::external(e))?;
+            let (final_cols, final_rows, final1_u8, _) =
+                resize_image_data(&s1_u8, None, cols, rows, target_size, BitDepth::U8, pad)
+                    .map_err(|e| Error::external(e))?;
 
             let (_db2, _m2, s2_u8, _s2_u16) =
                 process_complex_data_pipeline(&band2, BitDepth::U8, autoscale);
-            let (_c2, _r2, final2_u8, _) = resize_image_data(
-                &s2_u8,
-                None,
-                cols,
-                rows,
-                target_size,
-                BitDepth::U8,
-                pad,
-            ).map_err(|e| Error::external(e))?;
+            let (_c2, _r2, final2_u8, _) =
+                resize_image_data(&s2_u8, None, cols, rows, target_size, BitDepth::U8, pad)
+                    .map_err(|e| Error::external(e))?;
 
             let rgb = create_synthetic_rgb(&final1_u8, &final2_u8);
 
@@ -217,7 +237,10 @@ pub fn process_safe_to_buffer(
         }
 
         // Single-band JPEG grayscale (always U8)
-        (OutputFormat::JPEG, Polarization::Vv | Polarization::Vh | Polarization::Hh | Polarization::Hv) => {
+        (
+            OutputFormat::JPEG,
+            Polarization::Vv | Polarization::Vh | Polarization::Hh | Polarization::Hv,
+        ) => {
             let processed = match polarization {
                 Polarization::Vv => reader.vv_data()?,
                 Polarization::Vh => reader.vh_data()?,
@@ -229,15 +252,9 @@ pub fn process_safe_to_buffer(
             let (db_data, _m, s_u8, _s_u16) =
                 process_complex_data_pipeline(&processed, BitDepth::U8, autoscale);
             let (rows, cols) = db_data.dim();
-            let (final_cols, final_rows, final_u8, _) = resize_image_data(
-                &s_u8,
-                None,
-                cols,
-                rows,
-                target_size,
-                BitDepth::U8,
-                pad,
-            ).map_err(|e| Error::external(e))?;
+            let (final_cols, final_rows, final_u8, _) =
+                resize_image_data(&s_u8, None, cols, rows, target_size, BitDepth::U8, pad)
+                    .map_err(|e| Error::external(e))?;
 
             Ok(ProcessedImage {
                 width: final_cols,
@@ -256,29 +273,30 @@ pub fn process_safe_to_buffer(
         // Polarization operation -> single band path
         (format, Polarization::OP(op)) => {
             // Resolve to a single processed band first, then reuse single-band paths above
-            let combined: Array2<Complex<f64>> = if reader.vv_data().is_ok() && reader.vh_data().is_ok() {
-                match op {
-                    PolarizationOperation::Sum => reader.sum_data()?,
-                    PolarizationOperation::Diff => reader.difference_data()?,
-                    PolarizationOperation::Ratio => reader.ratio_data()?,
-                    PolarizationOperation::NDiff => reader.normalized_diff_data()?,
-                    PolarizationOperation::LogRatio => reader.log_ratio_data()?,
-                }
-            } else if reader.hh_data().is_ok() && reader.hv_data().is_ok() {
-                match op {
-                    PolarizationOperation::Sum => reader.sum_hh_hv_data()?,
-                    PolarizationOperation::Diff => reader.difference_hh_hv_data()?,
-                    PolarizationOperation::Ratio => reader.ratio_hh_hv_data()?,
-                    PolarizationOperation::NDiff => reader.normalized_diff_hh_hv_data()?,
-                    PolarizationOperation::LogRatio => reader.log_ratio_hh_hv_data()?,
-                }
-            } else {
-                return Err(Error::Processing(format!(
-                    "Operation {} requires VV+VH or HH+HV; available: {}",
-                    operation_to_str(op),
-                    reader.get_available_polarizations()
-                )));
-            };
+            let combined: Array2<Complex<f64>> =
+                if reader.vv_data().is_ok() && reader.vh_data().is_ok() {
+                    match op {
+                        PolarizationOperation::Sum => reader.sum_data()?,
+                        PolarizationOperation::Diff => reader.difference_data()?,
+                        PolarizationOperation::Ratio => reader.ratio_data()?,
+                        PolarizationOperation::NDiff => reader.normalized_diff_data()?,
+                        PolarizationOperation::LogRatio => reader.log_ratio_data()?,
+                    }
+                } else if reader.hh_data().is_ok() && reader.hv_data().is_ok() {
+                    match op {
+                        PolarizationOperation::Sum => reader.sum_hh_hv_data()?,
+                        PolarizationOperation::Diff => reader.difference_hh_hv_data()?,
+                        PolarizationOperation::Ratio => reader.ratio_hh_hv_data()?,
+                        PolarizationOperation::NDiff => reader.normalized_diff_hh_hv_data()?,
+                        PolarizationOperation::LogRatio => reader.log_ratio_hh_hv_data()?,
+                    }
+                } else {
+                    return Err(Error::Processing(format!(
+                        "Operation {} requires VV+VH or HH+HV; available: {}",
+                        operation_to_str(op),
+                        reader.get_available_polarizations()
+                    )));
+                };
 
             match format {
                 OutputFormat::TIFF => {
@@ -293,15 +311,24 @@ pub fn process_safe_to_buffer(
                         target_size,
                         bit_depth,
                         pad,
-                    ).map_err(|e| Error::external(e))?;
+                    )
+                    .map_err(|e| Error::external(e))?;
 
                     Ok(ProcessedImage {
                         width: final_cols,
                         height: final_rows,
                         bit_depth,
                         format: OutputFormat::TIFF,
-                        gray: if matches!(bit_depth, BitDepth::U8) { Some(final_u8) } else { None },
-                        gray16: if matches!(bit_depth, BitDepth::U16) { final_u16 } else { None },
+                        gray: if matches!(bit_depth, BitDepth::U8) {
+                            Some(final_u8)
+                        } else {
+                            None
+                        },
+                        gray16: if matches!(bit_depth, BitDepth::U16) {
+                            final_u16
+                        } else {
+                            None
+                        },
                         rgb: None,
                         gray_band2: None,
                         gray16_band2: None,
@@ -312,15 +339,9 @@ pub fn process_safe_to_buffer(
                     let (db_data, _m, s_u8, _s_u16) =
                         process_complex_data_pipeline(&combined, BitDepth::U8, autoscale);
                     let (rows, cols) = db_data.dim();
-                    let (final_cols, final_rows, final_u8, _) = resize_image_data(
-                        &s_u8,
-                        None,
-                        cols,
-                        rows,
-                        target_size,
-                        BitDepth::U8,
-                        pad,
-                    ).map_err(|e| Error::external(e))?;
+                    let (final_cols, final_rows, final_u8, _) =
+                        resize_image_data(&s_u8, None, cols, rows, target_size, BitDepth::U8, pad)
+                            .map_err(|e| Error::external(e))?;
                     Ok(ProcessedImage {
                         width: final_cols,
                         height: final_rows,
@@ -348,9 +369,7 @@ pub struct BatchReport {
 }
 
 /// Return an iterator over immediate subdirectories of `input_dir` (candidate SAFE products)
-pub fn iterate_safe_products(
-    input_dir: &Path,
-) -> Result<std::vec::IntoIter<std::path::PathBuf>> {
+pub fn iterate_safe_products(input_dir: &Path) -> Result<std::vec::IntoIter<std::path::PathBuf>> {
     let mut dirs = Vec::new();
     for entry in std::fs::read_dir(input_dir).map_err(Error::from)? {
         let entry = entry.map_err(Error::from)?;
@@ -408,11 +427,7 @@ pub fn process_directory_to_path(
 }
 
 /// Process a SAFE input to an output path using ProcessingParams
-pub fn process_safe_to_path(
-    input: &Path,
-    output: &Path,
-    params: &ProcessingParams,
-) -> Result<()> {
+pub fn process_safe_to_path(input: &Path, output: &Path, params: &ProcessingParams) -> Result<()> {
     let bit_depth = bitdepth_arg_to_bitdepth(params.bit_depth);
 
     // Open reader according to polarization
@@ -438,7 +453,8 @@ pub fn process_safe_to_path(
                 params.pad,
                 params.autoscale,
                 ProcessingOperation::SingleBand,
-            ).map_err(|e| Error::external(e))
+            )
+            .map_err(|e| Error::external(e))
         }
         Polarization::Multiband => {
             // Prefer VV/VH if present, otherwise HH/HV
@@ -456,7 +472,8 @@ pub fn process_safe_to_path(
                     params.pad,
                     params.autoscale,
                     ProcessingOperation::MultibandVvVh,
-                ).map_err(|e| Error::external(e))
+                )
+                .map_err(|e| Error::external(e))
             } else if reader.hh_data().is_ok() && reader.hv_data().is_ok() {
                 let hh = reader.hh_data()?;
                 let hv = reader.hv_data()?;
@@ -471,7 +488,8 @@ pub fn process_safe_to_path(
                     params.pad,
                     params.autoscale,
                     ProcessingOperation::MultibandHhHv,
-                ).map_err(|e| Error::external(e))
+                )
+                .map_err(|e| Error::external(e))
             } else {
                 Err(Error::Processing(format!(
                     "Multiband requires VV+VH or HH+HV; available: {}",
@@ -481,29 +499,30 @@ pub fn process_safe_to_path(
         }
         Polarization::OP(op) => {
             // Choose pair (VV/VH preferred)
-            let processed: Array2<Complex<f64>> = if reader.vv_data().is_ok() && reader.vh_data().is_ok() {
-                match op {
-                    PolarizationOperation::Sum => reader.sum_data()?,
-                    PolarizationOperation::Diff => reader.difference_data()?,
-                    PolarizationOperation::Ratio => reader.ratio_data()?,
-                    PolarizationOperation::NDiff => reader.normalized_diff_data()?,
-                    PolarizationOperation::LogRatio => reader.log_ratio_data()?,
-                }
-            } else if reader.hh_data().is_ok() && reader.hv_data().is_ok() {
-                match op {
-                    PolarizationOperation::Sum => reader.sum_hh_hv_data()?,
-                    PolarizationOperation::Diff => reader.difference_hh_hv_data()?,
-                    PolarizationOperation::Ratio => reader.ratio_hh_hv_data()?,
-                    PolarizationOperation::NDiff => reader.normalized_diff_hh_hv_data()?,
-                    PolarizationOperation::LogRatio => reader.log_ratio_hh_hv_data()?,
-                }
-            } else {
-                return Err(Error::Processing(format!(
-                    "Operation {} requires VV+VH or HH+HV; available: {}",
-                    operation_to_str(op),
-                    reader.get_available_polarizations()
-                )));
-            };
+            let processed: Array2<Complex<f64>> =
+                if reader.vv_data().is_ok() && reader.vh_data().is_ok() {
+                    match op {
+                        PolarizationOperation::Sum => reader.sum_data()?,
+                        PolarizationOperation::Diff => reader.difference_data()?,
+                        PolarizationOperation::Ratio => reader.ratio_data()?,
+                        PolarizationOperation::NDiff => reader.normalized_diff_data()?,
+                        PolarizationOperation::LogRatio => reader.log_ratio_data()?,
+                    }
+                } else if reader.hh_data().is_ok() && reader.hv_data().is_ok() {
+                    match op {
+                        PolarizationOperation::Sum => reader.sum_hh_hv_data()?,
+                        PolarizationOperation::Diff => reader.difference_hh_hv_data()?,
+                        PolarizationOperation::Ratio => reader.ratio_hh_hv_data()?,
+                        PolarizationOperation::NDiff => reader.normalized_diff_hh_hv_data()?,
+                        PolarizationOperation::LogRatio => reader.log_ratio_hh_hv_data()?,
+                    }
+                } else {
+                    return Err(Error::Processing(format!(
+                        "Operation {} requires VV+VH or HH+HV; available: {}",
+                        operation_to_str(op),
+                        reader.get_available_polarizations()
+                    )));
+                };
 
             save_processed_image(
                 &processed,
@@ -515,7 +534,8 @@ pub fn process_safe_to_path(
                 params.pad,
                 params.autoscale,
                 ProcessingOperation::PolarOp(op),
-            ).map_err(|e| Error::external(e))
+            )
+            .map_err(|e| Error::external(e))
         }
     }
 }
@@ -553,7 +573,8 @@ pub fn process_safe_with_options(
                 pad,
                 autoscale,
                 ProcessingOperation::SingleBand,
-            ).map_err(|e| Error::external(e))
+            )
+            .map_err(|e| Error::external(e))
         }
         Polarization::Multiband => {
             if reader.vv_data().is_ok() && reader.vh_data().is_ok() {
@@ -570,7 +591,8 @@ pub fn process_safe_with_options(
                     pad,
                     autoscale,
                     ProcessingOperation::MultibandVvVh,
-                ).map_err(|e| Error::external(e))
+                )
+                .map_err(|e| Error::external(e))
             } else if reader.hh_data().is_ok() && reader.hv_data().is_ok() {
                 let hh = reader.hh_data()?;
                 let hv = reader.hv_data()?;
@@ -585,7 +607,8 @@ pub fn process_safe_with_options(
                     pad,
                     autoscale,
                     ProcessingOperation::MultibandHhHv,
-                ).map_err(|e| Error::external(e))
+                )
+                .map_err(|e| Error::external(e))
             } else {
                 Err(Error::Processing(format!(
                     "Multiband requires VV+VH or HH+HV; available: {}",
@@ -594,29 +617,30 @@ pub fn process_safe_with_options(
             }
         }
         Polarization::OP(op) => {
-            let processed: Array2<Complex<f64>> = if reader.vv_data().is_ok() && reader.vh_data().is_ok() {
-                match op {
-                    PolarizationOperation::Sum => reader.sum_data()?,
-                    PolarizationOperation::Diff => reader.difference_data()?,
-                    PolarizationOperation::Ratio => reader.ratio_data()?,
-                    PolarizationOperation::NDiff => reader.normalized_diff_data()?,
-                    PolarizationOperation::LogRatio => reader.log_ratio_data()?,
-                }
-            } else if reader.hh_data().is_ok() && reader.hv_data().is_ok() {
-                match op {
-                    PolarizationOperation::Sum => reader.sum_hh_hv_data()?,
-                    PolarizationOperation::Diff => reader.difference_hh_hv_data()?,
-                    PolarizationOperation::Ratio => reader.ratio_hh_hv_data()?,
-                    PolarizationOperation::NDiff => reader.normalized_diff_hh_hv_data()?,
-                    PolarizationOperation::LogRatio => reader.log_ratio_hh_hv_data()?,
-                }
-            } else {
-                return Err(Error::Processing(format!(
-                    "Operation {} requires VV+VH or HH+HV; available: {}",
-                    operation_to_str(op),
-                    reader.get_available_polarizations()
-                )));
-            };
+            let processed: Array2<Complex<f64>> =
+                if reader.vv_data().is_ok() && reader.vh_data().is_ok() {
+                    match op {
+                        PolarizationOperation::Sum => reader.sum_data()?,
+                        PolarizationOperation::Diff => reader.difference_data()?,
+                        PolarizationOperation::Ratio => reader.ratio_data()?,
+                        PolarizationOperation::NDiff => reader.normalized_diff_data()?,
+                        PolarizationOperation::LogRatio => reader.log_ratio_data()?,
+                    }
+                } else if reader.hh_data().is_ok() && reader.hv_data().is_ok() {
+                    match op {
+                        PolarizationOperation::Sum => reader.sum_hh_hv_data()?,
+                        PolarizationOperation::Diff => reader.difference_hh_hv_data()?,
+                        PolarizationOperation::Ratio => reader.ratio_hh_hv_data()?,
+                        PolarizationOperation::NDiff => reader.normalized_diff_hh_hv_data()?,
+                        PolarizationOperation::LogRatio => reader.log_ratio_hh_hv_data()?,
+                    }
+                } else {
+                    return Err(Error::Processing(format!(
+                        "Operation {} requires VV+VH or HH+HV; available: {}",
+                        operation_to_str(op),
+                        reader.get_available_polarizations()
+                    )));
+                };
 
             save_processed_image(
                 &processed,
@@ -628,7 +652,8 @@ pub fn process_safe_with_options(
                 pad,
                 autoscale,
                 ProcessingOperation::PolarOp(op),
-            ).map_err(|e| Error::external(e))
+            )
+            .map_err(|e| Error::external(e))
         }
     }
 }
@@ -655,7 +680,8 @@ pub fn save_image(
         pad,
         autoscale,
         operation,
-    ).map_err(|e| Error::external(e))
+    )
+    .map_err(|e| Error::external(e))
 }
 
 /// Typed save helper for multiband arrays (VV/VH or HH/HV)
@@ -683,7 +709,8 @@ pub fn save_multiband_image(
         pad,
         autoscale,
         operation,
-    ).map_err(|e| Error::external(e))
+    )
+    .map_err(|e| Error::external(e))
 }
 
 /// Load a single polarization's complex array and metadata
@@ -695,7 +722,7 @@ pub fn load_polarization(
         Polarization::Multiband | Polarization::OP(_) => {
             return Err(Error::Processing(
                 "load_polarization expects a single polarization (vv/vh/hh/hv)".to_string(),
-            ))
+            ));
         }
         _ => {}
     }
@@ -745,5 +772,3 @@ pub fn load_operation(
         )))
     }
 }
-
-

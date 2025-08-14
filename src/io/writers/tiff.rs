@@ -1,6 +1,6 @@
-use gdal::raster::{Buffer, ColorInterpretation};
-use gdal::DriverManager;
 use gdal::Dataset;
+use gdal::DriverManager;
+use gdal::raster::{Buffer, ColorInterpretation};
 use std::path::Path;
 
 pub fn write_tiff_u8(
@@ -76,5 +76,3 @@ pub fn write_tiff_multiband_u16(
 
     Ok(ds)
 }
-
-

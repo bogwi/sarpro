@@ -45,5 +45,3 @@ pub fn add_padding_to_square(
         }
     }
 }
-
-

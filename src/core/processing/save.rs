@@ -6,11 +6,17 @@ use tracing::info;
 use crate::core::processing::pipeline::process_complex_data_pipeline;
 use crate::core::processing::resize::resize_image_data_with_meta;
 use crate::core::processing::synthetic_rgb::create_synthetic_rgb;
-use crate::types::{AutoscaleStrategy, BitDepth, OutputFormat, PolarizationOperation, ProcessingOperation};
 use crate::io::writers::jpeg::{write_gray_jpeg, write_rgb_jpeg};
-use crate::io::writers::metadata::{create_jpeg_metadata_sidecar_with_overrides, embed_tiff_metadata};
+use crate::io::writers::metadata::{
+    create_jpeg_metadata_sidecar_with_overrides, embed_tiff_metadata,
+};
+use crate::io::writers::tiff::{
+    write_tiff_multiband_u8, write_tiff_multiband_u16, write_tiff_u8, write_tiff_u16,
+};
 use crate::io::writers::worldfile::{write_prj_file, write_world_file};
-use crate::io::writers::tiff::{write_tiff_multiband_u16, write_tiff_multiband_u8, write_tiff_u16, write_tiff_u8};
+use crate::types::{
+    AutoscaleStrategy, BitDepth, OutputFormat, PolarizationOperation, ProcessingOperation,
+};
 
 // resize_image_data moved to crate::core::processing::resize
 
@@ -33,8 +39,12 @@ pub fn save_processed_image(
         ProcessingOperation::PolarOp(PolarizationOperation::Sum) => Some("sum".to_string()),
         ProcessingOperation::PolarOp(PolarizationOperation::Diff) => Some("difference".to_string()),
         ProcessingOperation::PolarOp(PolarizationOperation::Ratio) => Some("ratio".to_string()),
-        ProcessingOperation::PolarOp(PolarizationOperation::NDiff) => Some("normalized_diff".to_string()),
-        ProcessingOperation::PolarOp(PolarizationOperation::LogRatio) => Some("log_ratio".to_string()),
+        ProcessingOperation::PolarOp(PolarizationOperation::NDiff) => {
+            Some("normalized_diff".to_string())
+        }
+        ProcessingOperation::PolarOp(PolarizationOperation::LogRatio) => {
+            Some("log_ratio".to_string())
+        }
     };
     match format {
         OutputFormat::TIFF => {
@@ -43,15 +53,16 @@ pub fn save_processed_image(
             let shape = db_data.dim();
             let (rows, cols) = shape;
 
-            let (final_cols, final_rows, final_u8, final_u16, scale_x, scale_y, pad_left, pad_top) = resize_image_data_with_meta(
-                &scaled_u8,
-                scaled_u16.as_deref(),
-                cols,
-                rows,
-                target_size,
-                bit_depth,
-                pad,
-            )?;
+            let (final_cols, final_rows, final_u8, final_u16, scale_x, scale_y, pad_left, pad_top) =
+                resize_image_data_with_meta(
+                    &scaled_u8,
+                    scaled_u16.as_deref(),
+                    cols,
+                    rows,
+                    target_size,
+                    bit_depth,
+                    pad,
+                )?;
 
             // Compute updated geotransform if metadata available
             let mut gt_override: Option<[f64; 6]> = None;
@@ -59,14 +70,20 @@ pub fn save_processed_image(
             if let Some(meta) = metadata {
                 if let Some(mut gt) = meta.geotransform {
                     // Adjust pixel size by inverse of scaling
-                    if scale_x > 0.0 { gt[1] = gt[1] * (cols as f64 / final_cols as f64); }
-                    if scale_y > 0.0 { gt[5] = gt[5] * (rows as f64 / final_rows as f64); }
+                    if scale_x > 0.0 {
+                        gt[1] = gt[1] * (cols as f64 / final_cols as f64);
+                    }
+                    if scale_y > 0.0 {
+                        gt[5] = gt[5] * (rows as f64 / final_rows as f64);
+                    }
                     // Shift origin for padding
                     gt[0] = gt[0] - (pad_left as f64) * gt[1];
                     gt[3] = gt[3] - (pad_top as f64) * gt[5];
                     gt_override = Some(gt);
                 }
-                if let Some(p) = &meta.projection { proj_override = Some(p.clone()); }
+                if let Some(p) = &meta.projection {
+                    proj_override = Some(p.clone());
+                }
             }
 
             match bit_depth {
@@ -84,7 +101,8 @@ pub fn save_processed_image(
                     info!("save_processed_image: U8 TIFF saved with metadata");
                 }
                 BitDepth::U16 => {
-                    let mut ds = write_tiff_u16(output, final_cols, final_rows, &final_u16.unwrap())?;
+                    let mut ds =
+                        write_tiff_u16(output, final_cols, final_rows, &final_u16.unwrap())?;
                     if let Some(meta) = metadata {
                         embed_tiff_metadata(
                             &mut ds,
@@ -104,15 +122,16 @@ pub fn save_processed_image(
             let shape = db_data.dim();
             let (rows, cols) = shape;
 
-            let (final_cols, final_rows, final_u8, _, scale_x, scale_y, pad_left, pad_top) = resize_image_data_with_meta(
-                &scaled_u8,
-                None,
-                cols,
-                rows,
-                target_size,
-                BitDepth::U8,
-                pad,
-            )?;
+            let (final_cols, final_rows, final_u8, _, scale_x, scale_y, pad_left, pad_top) =
+                resize_image_data_with_meta(
+                    &scaled_u8,
+                    None,
+                    cols,
+                    rows,
+                    target_size,
+                    BitDepth::U8,
+                    pad,
+                )?;
 
             write_gray_jpeg(output, final_cols, final_rows, &final_u8)?;
 
@@ -120,14 +139,21 @@ pub fn save_processed_image(
                 let mut gt_override: Option<[f64; 6]> = None;
                 let mut proj_override: Option<String> = None;
                 if let Some(mut gt) = meta.geotransform {
-                    if scale_x > 0.0 { gt[1] = gt[1] * (cols as f64 / final_cols as f64); }
-                    if scale_y > 0.0 { gt[5] = gt[5] * (rows as f64 / final_rows as f64); }
+                    if scale_x > 0.0 {
+                        gt[1] = gt[1] * (cols as f64 / final_cols as f64);
+                    }
+                    if scale_y > 0.0 {
+                        gt[5] = gt[5] * (rows as f64 / final_rows as f64);
+                    }
                     gt[0] = gt[0] - (pad_left as f64) * gt[1];
                     gt[3] = gt[3] - (pad_top as f64) * gt[5];
                     write_world_file(output, gt)?;
                     gt_override = Some(gt);
                 }
-                if let Some(p) = &meta.projection { write_prj_file(output, p)?; proj_override = Some(p.clone()); }
+                if let Some(p) = &meta.projection {
+                    write_prj_file(output, p)?;
+                    proj_override = Some(p.clone());
+                }
                 create_jpeg_metadata_sidecar_with_overrides(
                     output,
                     meta,
@@ -162,8 +188,12 @@ pub fn save_processed_multiband_image_sequential(
         ProcessingOperation::PolarOp(PolarizationOperation::Sum) => Some("sum".to_string()),
         ProcessingOperation::PolarOp(PolarizationOperation::Diff) => Some("difference".to_string()),
         ProcessingOperation::PolarOp(PolarizationOperation::Ratio) => Some("ratio".to_string()),
-        ProcessingOperation::PolarOp(PolarizationOperation::NDiff) => Some("normalized_diff".to_string()),
-        ProcessingOperation::PolarOp(PolarizationOperation::LogRatio) => Some("log_ratio".to_string()),
+        ProcessingOperation::PolarOp(PolarizationOperation::NDiff) => {
+            Some("normalized_diff".to_string())
+        }
+        ProcessingOperation::PolarOp(PolarizationOperation::LogRatio) => {
+            Some("log_ratio".to_string())
+        }
     };
     match format {
         OutputFormat::TIFF => {
@@ -173,28 +203,35 @@ pub fn save_processed_multiband_image_sequential(
             let (db_data, valid_mask, scaled_u8, scaled_u16) =
                 process_complex_data_pipeline(processed1, bit_depth, strategy);
 
-            let (final_cols, final_rows, final_u8, final_u16, scale_x, scale_y, pad_left, pad_top) = resize_image_data_with_meta(
-                &scaled_u8,
-                scaled_u16.as_deref(),
-                cols,
-                rows,
-                target_size,
-                bit_depth,
-                pad,
-            )?;
+            let (final_cols, final_rows, final_u8, final_u16, scale_x, scale_y, pad_left, pad_top) =
+                resize_image_data_with_meta(
+                    &scaled_u8,
+                    scaled_u16.as_deref(),
+                    cols,
+                    rows,
+                    target_size,
+                    bit_depth,
+                    pad,
+                )?;
 
             // Compute updated geotransform if metadata available
             let mut gt_override: Option<[f64; 6]> = None;
             let mut proj_override: Option<String> = None;
             if let Some(meta) = metadata {
                 if let Some(mut gt) = meta.geotransform {
-                    if scale_x > 0.0 { gt[1] = gt[1] * (cols as f64 / final_cols as f64); }
-                    if scale_y > 0.0 { gt[5] = gt[5] * (rows as f64 / final_rows as f64); }
+                    if scale_x > 0.0 {
+                        gt[1] = gt[1] * (cols as f64 / final_cols as f64);
+                    }
+                    if scale_y > 0.0 {
+                        gt[5] = gt[5] * (rows as f64 / final_rows as f64);
+                    }
                     gt[0] = gt[0] - (pad_left as f64) * gt[1];
                     gt[3] = gt[3] - (pad_top as f64) * gt[5];
                     gt_override = Some(gt);
                 }
-                if let Some(p) = &meta.projection { proj_override = Some(p.clone()); }
+                if let Some(p) = &meta.projection {
+                    proj_override = Some(p.clone());
+                }
             }
 
             match bit_depth {
@@ -205,15 +242,16 @@ pub fn save_processed_multiband_image_sequential(
                     let (_, _, scaled_u8, _) =
                         process_complex_data_pipeline(processed2, bit_depth, strategy);
 
-                    let (_, _, final_u8_band2, _, _sx2, _sy2, _pl2, _pt2) = resize_image_data_with_meta(
-                        &scaled_u8,
-                        None,
-                        cols,
-                        rows,
-                        target_size,
-                        bit_depth,
-                        pad,
-                    )?;
+                    let (_, _, final_u8_band2, _, _sx2, _sy2, _pl2, _pt2) =
+                        resize_image_data_with_meta(
+                            &scaled_u8,
+                            None,
+                            cols,
+                            rows,
+                            target_size,
+                            bit_depth,
+                            pad,
+                        )?;
 
                     let mut ds = write_tiff_multiband_u8(
                         output,
@@ -231,7 +269,9 @@ pub fn save_processed_multiband_image_sequential(
                             proj_override.as_deref(),
                         )?;
                     }
-                    info!("save_processed_multiband_image_sequential: U8 TIFF saved with 2 bands and metadata");
+                    info!(
+                        "save_processed_multiband_image_sequential: U8 TIFF saved with 2 bands and metadata"
+                    );
                 }
                 BitDepth::U16 => {
                     let final_band1 = final_u16.as_ref().unwrap().clone();
@@ -267,7 +307,9 @@ pub fn save_processed_multiband_image_sequential(
                             proj_override.as_deref(),
                         )?;
                     }
-                    info!("save_processed_multiband_image_sequential: U16 TIFF saved with 2 bands and metadata");
+                    info!(
+                        "save_processed_multiband_image_sequential: U16 TIFF saved with 2 bands and metadata"
+                    );
                 }
             }
         }
@@ -279,7 +321,21 @@ pub fn save_processed_multiband_image_sequential(
             let shape = db_data.dim();
             let (rows, cols) = shape;
 
-            let (final_cols, final_rows, final_u8_band1, _, scale_x, scale_y, pad_left, pad_top) = resize_image_data_with_meta(
+            let (final_cols, final_rows, final_u8_band1, _, scale_x, scale_y, pad_left, pad_top) =
+                resize_image_data_with_meta(
+                    &scaled_u8,
+                    None,
+                    cols,
+                    rows,
+                    target_size,
+                    BitDepth::U8,
+                    pad,
+                )?;
+
+            let (_, _, scaled_u8, _) =
+                process_complex_data_pipeline(processed2, BitDepth::U8, strategy);
+
+            let (_, _, final_u8_band2, _, _sx2, _sy2, _pl2, _pt2) = resize_image_data_with_meta(
                 &scaled_u8,
                 None,
                 cols,
@@ -289,12 +345,6 @@ pub fn save_processed_multiband_image_sequential(
                 pad,
             )?;
 
-            let (_, _, scaled_u8, _) =
-                process_complex_data_pipeline(processed2, BitDepth::U8, strategy);
-
-            let (_, _, final_u8_band2, _, _sx2, _sy2, _pl2, _pt2) =
-                resize_image_data_with_meta(&scaled_u8, None, cols, rows, target_size, BitDepth::U8, pad)?;
-
             let rgb_data = create_synthetic_rgb(&final_u8_band1, &final_u8_band2);
 
             write_rgb_jpeg(output, final_cols, final_rows, &rgb_data)?;
@@ -303,14 +353,21 @@ pub fn save_processed_multiband_image_sequential(
                 let mut gt_override: Option<[f64; 6]> = None;
                 let mut proj_override: Option<String> = None;
                 if let Some(mut gt) = meta.geotransform {
-                    if scale_x > 0.0 { gt[1] = gt[1] * (cols as f64 / final_cols as f64); }
-                    if scale_y > 0.0 { gt[5] = gt[5] * (rows as f64 / final_rows as f64); }
+                    if scale_x > 0.0 {
+                        gt[1] = gt[1] * (cols as f64 / final_cols as f64);
+                    }
+                    if scale_y > 0.0 {
+                        gt[5] = gt[5] * (rows as f64 / final_rows as f64);
+                    }
                     gt[0] = gt[0] - (pad_left as f64) * gt[1];
                     gt[3] = gt[3] - (pad_top as f64) * gt[5];
                     write_world_file(output, gt)?;
                     gt_override = Some(gt);
                 }
-                if let Some(p) = &meta.projection { write_prj_file(output, p)?; proj_override = Some(p.clone()); }
+                if let Some(p) = &meta.projection {
+                    write_prj_file(output, p)?;
+                    proj_override = Some(p.clone());
+                }
                 create_jpeg_metadata_sidecar_with_overrides(
                     output,
                     meta,
@@ -327,5 +384,3 @@ pub fn save_processed_multiband_image_sequential(
     }
     Ok(())
 }
-
-

@@ -1,6 +1,6 @@
 use super::models::{SarproGui, SizeMode};
-use crate::{BitDepth, OutputFormat};
 use crate::{AutoscaleStrategy, Polarization, PolarizationOperation};
+use crate::{BitDepth, OutputFormat};
 use eframe::egui::{Align, Color32, ComboBox, Frame, Layout, RichText, Ui};
 
 const COMPONENT_HEIGHT: f32 = 80.0;
@@ -440,15 +440,12 @@ impl OptionsComponent {
             ui.horizontal(|ui| {
                 ui.label("Target CRS:");
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    // simple editable text field for EPSG or WKT; default EPSG:32630
-                    let response = ui.text_edit_singleline(&mut app.target_crs);
-                    if response.changed() && app.target_crs.trim().is_empty() {
-                        app.target_crs = "EPSG:32630".to_string();
-                    }
+                    // Editable text field for EPSG/WKT. Users can type 'none' to disable reprojection or leave blank.
+                    let _response = ui.text_edit_singleline(&mut app.target_crs);
                 });
             });
             ui.label(
-                RichText::new("Map projection to reproject into (e.g., EPSG:4326, EPSG:32633). Default: EPSG:32630.")
+                RichText::new("Map projection to reproject into (e.g., EPSG:4326, EPSG:32633). Type 'none' (or leave blank) to disable reprojection. Default: EPSG:32630.")
                     .color(Color32::from_gray(120))
                     .size(11.0)
             );

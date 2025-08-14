@@ -69,7 +69,9 @@ impl GdalSarReader {
         if proj.is_empty() {
             // Fallback to GCP projection if available
             if let Some(gcp_proj) = dataset.gcp_projection() {
-                if !gcp_proj.is_empty() { proj = gcp_proj; }
+                if !gcp_proj.is_empty() {
+                    proj = gcp_proj;
+                }
             }
         }
         let projection = if proj.starts_with("EPSG:") {
@@ -126,16 +128,15 @@ impl GdalSarReader {
         )?;
         // Convert Buffer into ndarray
         let data_vec = buf.data().to_vec();
-        let array =
-            Array2::from_shape_vec((self.metadata.size_y, self.metadata.size_x), data_vec)
-                .map_err(|_| {
-                    GdalError::DimensionMismatch(
-                        self.metadata.size_x,
-                        self.metadata.size_y,
-                        self.metadata.size_x,
-                        self.metadata.size_y,
-                    )
-                })?;
+        let array = Array2::from_shape_vec((self.metadata.size_y, self.metadata.size_x), data_vec)
+            .map_err(|_| {
+                GdalError::DimensionMismatch(
+                    self.metadata.size_x,
+                    self.metadata.size_y,
+                    self.metadata.size_x,
+                    self.metadata.size_y,
+                )
+            })?;
         Ok(array)
     }
 

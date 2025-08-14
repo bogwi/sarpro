@@ -19,7 +19,6 @@ pub enum AppError {
 
     // #[error("Unsupported product type: {product}")]
     // UnsupportedProduct { product: String },
-
     #[error("Missing required argument: {arg}")]
     MissingArgument { arg: String },
 
@@ -29,5 +28,3 @@ pub enum AppError {
     #[error("SAFE reader error: {0}")]
     Safe(#[from] sarpro::io::SafeError),
 }
-
-

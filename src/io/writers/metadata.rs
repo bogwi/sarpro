@@ -285,7 +285,10 @@ pub fn add_special_json_fields(
     // Handle CRS field
     if let Some(crs) = projection_override.or(meta.crs.as_deref()) {
         if !crs.is_empty() {
-            json_metadata.insert("crs".to_string(), serde_json::Value::String(crs.to_string()));
+            json_metadata.insert(
+                "crs".to_string(),
+                serde_json::Value::String(crs.to_string()),
+            );
         }
     }
 }
@@ -299,7 +302,9 @@ pub fn embed_tiff_metadata(
     projection_override: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Set georeferencing information
-    let is_identity = |gt: [f64; 6]| gt[0] == 0.0 && gt[1] == 1.0 && gt[2] == 0.0 && gt[3] == 0.0 && gt[4] == 0.0 && gt[5] == 1.0;
+    let is_identity = |gt: [f64; 6]| {
+        gt[0] == 0.0 && gt[1] == 1.0 && gt[2] == 0.0 && gt[3] == 0.0 && gt[4] == 0.0 && gt[5] == 1.0
+    };
 
     // Determine which geotransform to use and whether it's valid
     let mut set_gt = false;
@@ -371,7 +376,12 @@ pub fn create_jpeg_metadata_sidecar_with_overrides(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let metadata = extract_metadata_fields(meta, operation);
     let mut json_metadata = convert_metadata_to_json(&metadata);
-    add_special_json_fields(&mut json_metadata, meta, geotransform_override, projection_override);
+    add_special_json_fields(
+        &mut json_metadata,
+        meta,
+        geotransform_override,
+        projection_override,
+    );
     let sidecar_path = output_path.with_extension("json");
     let json_string = serde_json::to_string_pretty(&json_metadata)?;
     std::fs::write(&sidecar_path, json_string)?;
@@ -394,5 +404,3 @@ pub fn handle_metadata(
         MetadataFormat::Json => create_jpeg_metadata_sidecar(output_path, meta, None),
     }
 }
-
-

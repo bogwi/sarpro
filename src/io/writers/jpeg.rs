@@ -28,5 +28,3 @@ pub fn write_rgb_jpeg(
     encoder.encode(rgb_data, cols as u16, rows as u16, ColorType::Rgb)?;
     Ok(())
 }
-
-

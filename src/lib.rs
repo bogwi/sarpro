@@ -195,11 +195,11 @@ Useful modules
 "#]
 
 // Core modules (public)
-pub mod io;
-pub mod core;
-pub mod types;
 pub mod api;
+pub mod core;
 pub mod error;
+pub mod io;
+pub mod types;
 
 // GUI module (only available with gui feature)
 #[cfg(feature = "gui")]
@@ -207,12 +207,15 @@ pub mod gui;
 
 // Curated public API surface
 // Types
-pub use types::{AutoscaleStrategy, BitDepthArg, InputFormat, Polarization, PolarizationOperation, ProcessingOperation, BitDepth, OutputFormat};
 pub use core::params::ProcessingParams;
 pub use error::{Error, Result};
+pub use types::{
+    AutoscaleStrategy, BitDepth, BitDepthArg, InputFormat, OutputFormat, Polarization,
+    PolarizationOperation, ProcessingOperation,
+};
 
 // Readers
-pub use io::gdal::{GdalSarReader, GdalError, GdalMetadata};
+pub use io::gdal::{GdalError, GdalMetadata, GdalSarReader};
 pub use io::sentinel1::{ProductType, SafeError, SafeMetadata, SafeReader};
 
 // Selected writer helpers (keep low-level metadata helpers public)
@@ -222,15 +225,7 @@ pub use io::writers::metadata::{
 
 // High-level API re-exports
 pub use api::{
-    process_safe_to_path,
-    process_safe_with_options,
-    process_safe_to_buffer,
-    ProcessedImage,
-    process_directory_to_path,
-    iterate_safe_products,
-    BatchReport,
-    save_image,
-    save_multiband_image,
-    load_polarization,
-    load_operation,
+    BatchReport, ProcessedImage, iterate_safe_products, load_operation, load_polarization,
+    process_directory_to_path, process_safe_to_buffer, process_safe_to_path,
+    process_safe_with_options, save_image, save_multiband_image,
 };

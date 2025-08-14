@@ -4,7 +4,10 @@ use std::path::Path;
 
 /// Write a world file next to the raster image using the provided geotransform.
 /// The world file stores the transform in pixel-center convention.
-pub fn write_world_file(output_image: &Path, geotransform: [f64; 6]) -> Result<(), Box<dyn std::error::Error>> {
+pub fn write_world_file(
+    output_image: &Path,
+    geotransform: [f64; 6],
+) -> Result<(), Box<dyn std::error::Error>> {
     let ext = output_image
         .extension()
         .and_then(|e| e.to_str())
@@ -51,10 +54,11 @@ pub fn write_world_file(output_image: &Path, geotransform: [f64; 6]) -> Result<(
 }
 
 /// Write a .prj file with the provided projection (WKT or EPSG:XXXX)
-pub fn write_prj_file(output_image: &Path, projection: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub fn write_prj_file(
+    output_image: &Path,
+    projection: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let prj_path = output_image.with_extension("prj");
     std::fs::write(prj_path, projection.as_bytes())?;
     Ok(())
 }
-
-

@@ -35,5 +35,3 @@ pub fn create_synthetic_rgb(band1_data: &[u8], band2_data: &[u8]) -> Vec<u8> {
 
     rgb_data
 }
-
-

@@ -4,10 +4,12 @@ use std::path::PathBuf;
 use num_complex::Complex;
 use tracing::{info, warn};
 
-use sarpro::io::SafeReader;
 use gdal::raster::ResampleAlg;
-use sarpro::core::processing::save::{save_processed_image, save_processed_multiband_image_sequential};
-use sarpro::types::{OutputFormat, BitDepth, ProcessingOperation};
+use sarpro::core::processing::save::{
+    save_processed_image, save_processed_multiband_image_sequential,
+};
+use sarpro::io::SafeReader;
+use sarpro::types::{BitDepth, OutputFormat, ProcessingOperation};
 use sarpro::{AutoscaleStrategy, BitDepthArg, InputFormat, Polarization, PolarizationOperation};
 
 use super::args::CliArgs;
@@ -53,15 +55,13 @@ fn process_single_file(
 
     let reader = if batch_mode {
         match input_format {
-            InputFormat::Safe => {
-                match SafeReader::open_with_warnings(input, polarization_str)? {
-                    Some(reader) => reader,
-                    None => {
-                        warn!("Skipping unsupported product type: {:?}", input);
-                        return Ok(());
-                    }
+            InputFormat::Safe => match SafeReader::open_with_warnings(input, polarization_str)? {
+                Some(reader) => reader,
+                None => {
+                    warn!("Skipping unsupported product type: {:?}", input);
+                    return Ok(());
                 }
-            }
+            },
         }
     } else {
         match input_format {
@@ -73,7 +73,17 @@ fn process_single_file(
                     _ => None,
                 };
                 if let Some(tgt) = target_crs {
-                    SafeReader::open_with_options(input, polarization_str, Some(tgt), resample_alg)?
+                    if tgt.eq_ignore_ascii_case("none") {
+                        // Explicitly disable reprojection
+                        SafeReader::open(input, polarization_str)?
+                    } else {
+                        SafeReader::open_with_options(
+                            input,
+                            polarization_str,
+                            Some(tgt),
+                            resample_alg,
+                        )?
+                    }
                 } else {
                     SafeReader::open(input, polarization_str)?
                 }
@@ -334,5 +344,3 @@ pub fn run(args: CliArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-
-

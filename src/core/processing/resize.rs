@@ -1,7 +1,7 @@
-use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer, images::Image};
-use tracing::{warn, info};
-use crate::types::BitDepth;
 use crate::core::processing::padding::add_padding_to_square;
+use crate::types::BitDepth;
+use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer, images::Image};
+use tracing::{info, warn};
 
 pub fn calculate_resize_dimensions(
     original_cols: usize,
@@ -86,8 +86,8 @@ pub fn resize_image_data_with_meta(
         usize,
         Vec<u8>,
         Option<Vec<u16>>,
-        f64, // scale_x
-        f64, // scale_y
+        f64,   // scale_x
+        f64,   // scale_y
         usize, // pad_left
         usize, // pad_top
     ),
@@ -133,14 +133,7 @@ pub fn resize_image_data_with_meta(
             let pad_left = (final_dim - new_cols) / 2;
             let pad_top = (final_dim - new_rows) / 2;
             Ok((
-                final_dim,
-                final_dim,
-                padded_u8,
-                padded_u16,
-                scale_x,
-                scale_y,
-                pad_left,
-                pad_top,
+                final_dim, final_dim, padded_u8, padded_u16, scale_x, scale_y, pad_left, pad_top,
             ))
         } else {
             Ok((
@@ -162,14 +155,7 @@ pub fn resize_image_data_with_meta(
             let pad_left = (final_dim - original_cols) / 2;
             let pad_top = (final_dim - original_rows) / 2;
             Ok((
-                final_dim,
-                final_dim,
-                padded_u8,
-                padded_u16,
-                1.0,
-                1.0,
-                pad_left,
-                pad_top,
+                final_dim, final_dim, padded_u8, padded_u16, 1.0, 1.0, pad_left, pad_top,
             ))
         } else {
             match bit_depth {
@@ -221,7 +207,3 @@ pub fn resize_image_data(
     )?;
     Ok((c, r, u8v, u16v))
 }
-
-
-
-

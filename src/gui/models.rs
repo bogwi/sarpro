@@ -1,6 +1,6 @@
 use crate::gui::logging::{GuiLogLayer, LogEntry};
-use crate::{BitDepth, OutputFormat};
 use crate::{AutoscaleStrategy, InputFormat, Polarization, PolarizationOperation};
+use crate::{BitDepth, OutputFormat};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use std::fs;

@@ -36,5 +36,3 @@ impl Default for ProcessingParams {
         }
     }
 }
-
-

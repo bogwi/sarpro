@@ -10,9 +10,9 @@ use tracing::info;
 use tracing::warn;
 
 use crate::io::gdal::GdalSarReader;
-use gdal::raster::ResampleAlg;
-use gdal::raster::Buffer;
 use gdal::Dataset;
+use gdal::raster::Buffer;
+use gdal::raster::ResampleAlg;
 use std::process::Command;
 
 /// Errors encountered when reading SAFE archives
@@ -726,7 +726,11 @@ impl SafeReader {
             // Guard: if dataset already has a projection equal to target, skip warping
             if !ds_proj.is_empty() {
                 if let Some(epsg) = parse_epsg(&ds_proj).or_else(|| {
-                    if ds_proj.starts_with("EPSG:") { Some(ds_proj.clone()) } else { None }
+                    if ds_proj.starts_with("EPSG:") {
+                        Some(ds_proj.clone())
+                    } else {
+                        None
+                    }
                 }) {
                     if epsg.eq_ignore_ascii_case(dst) {
                         info!("Input already in target CRS ({}); skipping warp", dst);
@@ -753,16 +757,22 @@ impl SafeReader {
             }
             // Choose warp mode: if dataset has no projection, use GCP+tps with s_srs; otherwise, standard warp
             let mut args: Vec<String> = vec![
-                "-of".into(), "GTiff".into(),
+                "-of".into(),
+                "GTiff".into(),
                 "-overwrite".into(),
-                "-r".into(), resample_str.into(),
+                "-r".into(),
+                resample_str.into(),
             ];
             if ds_proj.is_empty() {
                 // Use GCPs via thin plate spline to geolocate Sentinel-1 GRD rasters
                 args.push("-tps".into());
                 // Source SRS from GCP projection (fallback to EPSG:4326)
                 let src_gcp_proj = src_ds.gcp_projection().unwrap_or_else(|| "".to_string());
-                let src_srs = if src_gcp_proj.trim().is_empty() { "EPSG:4326".to_string() } else { src_gcp_proj };
+                let src_srs = if src_gcp_proj.trim().is_empty() {
+                    "EPSG:4326".to_string()
+                } else {
+                    src_gcp_proj
+                };
                 args.push("-s_srs".into());
                 args.push(src_srs);
             }
@@ -794,7 +804,9 @@ impl SafeReader {
 
             // Read first band as f64 array
             let (size_x, size_y) = ds.raster_size();
-            let band = ds.rasterband(1).map_err(|e| SafeError::Parse(format!("GDAL error: {}", e)))?;
+            let band = ds
+                .rasterband(1)
+                .map_err(|e| SafeError::Parse(format!("GDAL error: {}", e)))?;
             let buf: Buffer<f64> = band
                 .read_as((0, 0), (size_x, size_y), (size_x, size_y), None)
                 .map_err(|e| SafeError::Parse(format!("GDAL error: {}", e)))?;
@@ -1228,7 +1240,9 @@ impl SafeReader {
         info!("Calculating normalized difference of VV and VH data");
         let vv = self.vv_data()?;
         let vh = self.vh_data()?;
-        Ok(crate::core::processing::ops::normalized_diff_arrays(&vv, &vh))
+        Ok(crate::core::processing::ops::normalized_diff_arrays(
+            &vv, &vh,
+        ))
     }
 
     /// Get log ratio of VV and VH data (10 * log10(vv / vh))
@@ -1269,7 +1283,9 @@ impl SafeReader {
         info!("Calculating normalized difference of HH and HV data");
         let hh = self.hh_data()?;
         let hv = self.hv_data()?;
-        Ok(crate::core::processing::ops::normalized_diff_arrays(&hh, &hv))
+        Ok(crate::core::processing::ops::normalized_diff_arrays(
+            &hh, &hv,
+        ))
     }
 
     /// Get log ratio of HH and HV data (10 * log10(hh / hv))

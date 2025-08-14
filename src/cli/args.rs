@@ -1,8 +1,8 @@
 use clap::Parser;
 use std::path::PathBuf;
 
-use sarpro::{AutoscaleStrategy, BitDepthArg, InputFormat, Polarization};
 use sarpro::types::OutputFormat;
+use sarpro::{AutoscaleStrategy, BitDepthArg, InputFormat, Polarization};
 
 #[derive(Parser)]
 #[command(name = "sarpro", version, about = "SARPRO CLI")]
@@ -70,5 +70,3 @@ pub struct CliArgs {
     #[arg(long)]
     pub resample_alg: Option<String>,
 }
-
-

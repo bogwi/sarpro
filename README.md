@@ -12,6 +12,10 @@ A high-performance Sentinel-1 Synthetic Aperture Radar (SAR) GRD product to imag
 - **Output Formats**: TIFF and JPEG support with configurable bit depths
 - **Memory Efficient**: Optimized for processing large SAR datasets
 - **I/O Optimized**: Performance typically limited by disk I/O, not CPU processing
+- **since v0.2.0**: Can now reproject to any CRS and resample with nearest, bilinear, or cubic algorithms
+
+## CHANGELOG IS FIRST THING TO READ
+Till the project in not version 1.0.0, always visit [CHANGELOG.md](CHANGELOG.md) for the full changelog. *The updating aims to be complementary and not breaking were possible, yet the API is still experimental and may evolve. GUI most likely will be the first to be updated with new features and improvements.*
 
 ## Best Usage Practices
 
@@ -27,7 +31,7 @@ A high-performance Sentinel-1 Synthetic Aperture Radar (SAR) GRD product to imag
 
 SARPRO is optimized for bulk processing with exceptional performance:
 
-- **Performance**: Processing a dual-band 400MP SAR GRD product image and scaling it to 4MP (2048x2048) synthetic RGB JPEG with padding takes approximately **30 seconds** on a modern laptop with Tamed db autoscale strategy. Expect 10x performance improvement in the cloud.
+- **Performance**: Processing a dual-band 400MP SAR GRD product image and scaling it to 4MP (2048x2048) synthetic RGB JPEG with padding and reprojection takes approximately **60 seconds** on a modern laptop with Tamed db autoscale strategy. Setting reprojection to `none` will reduce the time to **30 seconds**. Expect 10x performance improvement in the cloud.
 - **CPU vs I/O**: Debug and release builds show negligible performance differences even on the latest Apple Silicon laptops, indicating that your performance will typically be **limited by I/O, not CPU**
 - **Scalability**: Run multiple SARPRO or SARPRO UI instances in parallel — limited only by your system’s resources — to handle different workflows simultaneously.
 - **Memory Usage**: The memory impact is staged sequentially.
@@ -38,6 +42,17 @@ SARPRO is optimized for bulk processing with exceptional performance:
 1. **ML Pipeline Preparation**: Use CLI batch mode to process large collections of Sentinel-1 data into consistent formats
 2. **Quality Assessment**: Use GUI for initial data exploration and parameter tuning
 3. **Custom Integration**: Use the library API for specialized processing chains or integration with existing systems
+
+### About using reprojection or not
+Setting reprojection to `--target-crs none` or ommiting it preserves native geometry just as it is packed in the SAFE product.
+
+#### When native/no-reprojection is useful:  
+- Quantitative workflows that avoid resampling:
+    - Change detection/ratios on same-orbit, same-processing GRDs handled by an external co-registration/RDTC step.
+    - Preserving radiometry/speckle statistics (no interpolation).
+- Downstream processing that performs proper RDTC later (don’t warp twice).
+- Performance/throughput and reproducibility of pixel values for ML feature engineering.
+- Quicklooks where map-accurate alignment is not required.
 
 ## Requirements
 
@@ -136,7 +151,7 @@ The CLI provides powerful batch processing capabilities for SAR imagery, optimiz
 ```bash
 
 # Batch process a directory
-cargo run --release --bin sarpro -- --input-dir /path/to/safe/directories --output-dir /path/to/output --batch --log --format jpeg --polarization multiband --size 1024 --autoscale tamed
+cargo run --release --bin sarpro -- --input-dir /path/to/safe/directories --output-dir /path/to/output --batch --log --format jpeg --polarization multiband --size 1024 --autoscale tamed --target-crs EPSG:32630 --resample-alg bilinear
 
 # Process a .SAFE file with specific parameters
 cargo run --release --bin sarpro -- -i data.SAFE -o output.tiff \
@@ -145,6 +160,8 @@ cargo run --release --bin sarpro -- -i data.SAFE -o output.tiff \
     --bit-depth u16 \
     --size 1024 \
     --autoscale tamed \
+    --target-crs EPSG:32630 \
+    --resample-alg bilinear \
     --log
 ```
 
@@ -162,6 +179,9 @@ cargo run --release --bin sarpro -- -i data.SAFE -o output.tiff \
 - `--pad`: Add padding to make square images
 - `--batch`: Enable batch mode with error resilience
 - `--log`: Enable detailed logging
+
+- `--target-crs`: Optional target CRS for map reprojection (e.g., `EPSG:4326`, `EPSG:32633`); use `none` to disable reprojection explicitly
+- `--resample-alg`: Resampling algorithm for reprojection (`nearest`, `bilinear`, `cubic`) — default: `bilinear`
 
 ### Graphical User Interface (GUI)
 
@@ -192,7 +212,7 @@ The GUI is the easiest way to get started with SARPRO locally.
 
 ![SARPRO GUI](src/assets/sarprogui.png)
 
-#### Render example of Sentinel-1 SAR GRD product downloaded from [dataspace.copernicus.eu](https://dataspace.copernicus.eu/). The 25192 × 19614px (~500MP) dual-band image scaled to 2048px on the long side and carrying metadata took just 35 seconds on Apple M4Pro with CPU < 22% usage. 
+#### Render example of Sentinel-1 SAR GRD product downloaded from [dataspace.copernicus.eu](https://dataspace.copernicus.eu/). The 25192 × 19614px (~500MP) reprojected, dual-band image scaled and padded to 3024px on the long side and carrying metadata took just ~80 seconds on Apple M4Pro with CPU < 22% usage. 
 ```Summary
 Name: S1C_IW_GRDH_1SDV_20250730T142348_20250730T142417_003451_006EEA_895D.SAFE
 Size: 1893MB
@@ -204,12 +224,13 @@ Instrument short name: SAR
 #### Synthetic RGB
 Create good lookers using synthetic RGB JPEGs in a few clicks. 
 
-![synRGB](src/assets/S1C_IW_GRDH_1SDV_20250730T142348_20250730T142417_003451_006EEA_895D.SAFE__dubai_synRGB.jpg)
+![synRGB](src/assets/S1C_IW_GRDH_1SDV_20250730T142348_20250730T142417_003451_006EEA_895D.SAFE_SARPRO_dubai_synRGB.jpg)
 
 #### Multiband
 Get what you need in classic multi-band Grayscale TIFFs, quickly.
 
-![multiband](src/assets/S1C_IW_GRDH_1SDV_20250730T142348_20250730T142417_003451_006EEA_895D.SAFE__dubai_multiband.jpg)
+![multiband](src/assets/S1C_IW_GRDH_1SDV_20250730T142348_20250730T142417_003451_006EEA_895D.SAFE_SARPRO_dubai_multiband.jpg)
+
 
 ### As a Library
 
@@ -361,6 +382,44 @@ println!("processed={}, skipped={}, errors={}", report.processed, report.skipped
 - **Product Types**: Ground Range Detected (GRD)
 - **Output Formats**: GeoTIFF, JPEG
 
+## Product assumptions and processing pipeline
+
+### What official Sentinel‑1 GRD already includes
+
+- Radiometric calibration: Yes — DN values are converted to backscatter coefficients (σ⁰/β⁰/γ⁰) in ESA’s GRD chain
+- Thermal noise removal: Yes — applied since IPF 2.9 (2018+)
+- Multilooking & ground‑range projection: Yes — GRD is multilooked and in ground‑range geometry
+- Range‑Doppler Terrain Correction (orthorectification): No — GRD remains in radar geometry without RDTC
+
+### What SARPRO does and does not do
+
+- SARPRO does not perform RDTC/orthorectification or DEM‑based terrain correction
+- Optional map reprojection: If `--target-crs` is set, SARPRO uses GDAL `gdalwarp` to reproject using the product’s georeferencing (and falls back to GCP + `-tps` if needed). This improves map alignment in many cases but is not a substitute for full RDTC
+- Core image steps: magnitude→dB conversion, SAR‑tuned autoscaling, optional resize/pad, then write GeoTIFF or JPEG with metadata. TIFF embeds georeferencing; JPEG is accompanied by `.json`, `.jgw/.wld`, and `.prj` sidecars
+
+### Processing flow
+
+```mermaid
+flowchart TB
+  A["Input: Sentinel-1 SAFE (GRD)"] --> B["Parse manifest.safe + annotation XMLs\nExtract product & georef metadata"]
+  A --> C["Identify polarization measurement TIFFs (VV/VH/HH/HV)"]
+  C --> D["Read TIFF via GDAL\narray + geotransform + projection/GCP"]
+  D --> E{"Target CRS specified?"}
+  E -- "Yes" --> F["Warp with gdalwarp to target CRS\n-r nearest/bilinear/cubic\nIf no SRS: use GCP + -tps"]
+  E -- "No" --> G["Use native georeferencing"]
+  F --> H["Optional polarization ops\nsum/diff/ratio/n-diff/log-ratio or pair for synRGB"]
+  G --> H
+  H --> I["Convert magnitude to dB\n10·log10(|x|) and mask invalid"]
+  I --> J["Autoscale to U8/U16 using strategy\nstandard/robust/adaptive/equalized/tamed"]
+  J --> K["Optional resize (long side)"]
+  K --> L["Optional pad to square"]
+  L --> M{"Output format"}
+  M -- "TIFF (u8/u16)" --> N["Write GeoTIFF bands"]
+  N --> O["Embed metadata (geotransform/projection + attributes)"]
+  M -- "JPEG (gray/synRGB)" --> P["Write JPEG"]
+  P --> Q["Sidecars: .json (metadata), .jgw/.wld, .prj"]
+```
+
 ## Roadmap
 
 ### Before v1.0.0
@@ -368,6 +427,7 @@ println!("processed={}, skipped={}, errors={}", report.processed, report.skipped
 - **Tiling Support**: Divide large SAR scenes into smaller tiles for easier processing and ML training
 - **Parallel Workflows**: Multiple independent conversion processes running simultaneously within the same application
 - **Polarimetric Indices**: Complete support for advanced indices including RVI, PR, CPD, and more
+- **RDTC/orthorectification | DEM‑based terrain correction**: yes.
 
 ### Future Versions
 - **v2.x**: Possible SLC (Single Look Complex) product support

@@ -169,5 +169,3 @@ pub enum BitDepth {
     U8,
     U16,
 }
-
-

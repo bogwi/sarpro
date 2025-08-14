@@ -338,29 +338,17 @@ pub fn autoscale_db_image_to_bitdepth_advanced(
 ) -> (Vec<u8>, Option<Vec<u16>>) {
     match bit_depth {
         BitDepth::U8 => {
-            let v: Vec<u16> = autoscale_db_image_advanced(
-                db,
-                valid_mask,
-                valid_db,
-                BitDepth::U8,
-                strategy,
-            );
+            let v: Vec<u16> =
+                autoscale_db_image_advanced(db, valid_mask, valid_db, BitDepth::U8, strategy);
             let u8_data = scale_u16_to_u8(&v);
             debug!("autoscale_db_image_to_bitdepth: U8");
             (u8_data, None)
         }
         BitDepth::U16 => {
-            let v: Vec<u16> = autoscale_db_image_advanced(
-                db,
-                valid_mask,
-                valid_db,
-                BitDepth::U16,
-                strategy,
-            );
+            let v: Vec<u16> =
+                autoscale_db_image_advanced(db, valid_mask, valid_db, BitDepth::U16, strategy);
             debug!("autoscale_db_image_to_bitdepth: U16");
             (vec![], Some(v))
         }
     }
 }
-
-

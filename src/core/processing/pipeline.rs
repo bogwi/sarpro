@@ -1,15 +1,12 @@
 use ndarray::Array2;
 use num_complex::Complex;
- 
 
 use crate::core::processing::autoscale::{
     autoscale_db_image_to_bitdepth, autoscale_db_image_to_bitdepth_advanced,
 };
 use crate::types::{AutoscaleStrategy, BitDepth};
 
-pub fn process_complex_data_inplace(
-    processed: &Array2<Complex<f64>>,
-) -> (Array2<f64>, Vec<bool>) {
+pub fn process_complex_data_inplace(processed: &Array2<Complex<f64>>) -> (Array2<f64>, Vec<bool>) {
     let shape = processed.dim();
     let mut db_data = Array2::<f64>::zeros(shape);
     let mut valid_mask = Vec::with_capacity(shape.0 * shape.1);
@@ -56,5 +53,3 @@ pub fn process_complex_data_pipeline(
 
     (db_data, valid_mask, scaled_u8, scaled_u16)
 }
-
-

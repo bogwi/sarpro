@@ -101,7 +101,6 @@ impl eframe::App for SarproGui {
                                     .size(10.0)
                                     .color(egui::Color32::from_gray(150)),
                             );
-                            
                         });
                     });
                     ui.label(

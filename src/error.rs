@@ -25,8 +25,13 @@ pub enum Error {
     #[error("Missing required argument: {arg}")]
     MissingArgument { arg: String },
 
-    #[error("No complete polarization data available for operation: {operation}. Available: {available}")]
-    IncompleteDataPair { operation: String, available: String },
+    #[error(
+        "No complete polarization data available for operation: {operation}. Available: {available}"
+    )]
+    IncompleteDataPair {
+        operation: String,
+        available: String,
+    },
 
     #[error("Processing error: {0}")]
     Processing(String),
@@ -40,5 +45,3 @@ impl Error {
         Error::External(e.to_string())
     }
 }
-
-

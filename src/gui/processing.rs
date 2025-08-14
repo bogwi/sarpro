@@ -2,8 +2,8 @@ use super::logging::GuiLogLayer;
 use super::models::{SarproGui, SizeMode};
 use crate::gui::models::init_gui_logging;
 use crate::io::sentinel1::SafeReader;
-use crate::{BitDepth, OutputFormat};
 use crate::{AutoscaleStrategy, InputFormat, Polarization, PolarizationOperation};
+use crate::{BitDepth, OutputFormat};
 use num_complex::Complex;
 use std::fs;
 use std::path::PathBuf;
@@ -220,14 +220,20 @@ impl SarproGui {
                         "cubic" => Some(gdal::raster::ResampleAlg::Cubic),
                         _ => Some(gdal::raster::ResampleAlg::Bilinear),
                     };
-                    // Use target CRS if provided (default from GUI is EPSG:32630)
-                    let tgt = if self.target_crs.trim().is_empty() {
+                    // Use target CRS if provided; treat "none" (case-insensitive) or blank as no reprojection
+                    let trimmed = self.target_crs.trim().to_string();
+                    let tgt_opt = if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") {
                         None
                     } else {
-                        Some(self.target_crs.trim())
+                        Some(trimmed.as_str())
                     };
-                    let reader = if let Some(tgt_crs) = tgt {
-                        SafeReader::open_with_options(input, polarization_str, Some(tgt_crs), resample)?
+                    let reader = if let Some(tgt_crs) = tgt_opt {
+                        SafeReader::open_with_options(
+                            input,
+                            polarization_str,
+                            Some(tgt_crs),
+                            resample,
+                        )?
                     } else {
                         SafeReader::open(input, polarization_str)?
                     };
@@ -480,7 +486,7 @@ impl SarproGui {
                 input_format,
                 bit_depth,
                 polarization,
-                autoscale,   // Use the actual autoscale strategy from GUI
+                autoscale, // Use the actual autoscale strategy from GUI
                 target_crs,
                 resample_alg,
                 size_mode,   // <-- FIX: use actual size_mode
