@@ -41,6 +41,8 @@ fn main() -> sarpro::Result<()> {
         bit_depth: BitDepthArg::U16,
         polarization: Polarization::Multiband,
         autoscale: AutoscaleStrategy::Tamed,
+        target_crs: Some("EPSG:32630".to_string()),
+        resample_alg: Some("lanczos".to_string()),
         size: Some(2048),
         pad: true,
     };
@@ -136,6 +138,8 @@ fn main() -> sarpro::Result<()> {
         bit_depth: BitDepthArg::U8,
         polarization: Polarization::Multiband,
         autoscale: AutoscaleStrategy::Tamed,
+        target_crs: Some("EPSG:32630".to_string()),
+        resample_alg: Some("lanczos".to_string()),
         size: Some(1024),
         pad: true,
     };
@@ -168,6 +172,8 @@ fn main() {
         bit_depth: BitDepthArg::U8,
         polarization: Polarization::Vv,
         autoscale: AutoscaleStrategy::Tamed,
+        target_crs: Some("EPSG:32630".to_string()),
+        resample_alg: Some("lanczos".to_string()),
         size: None,
         pad: false,
     };

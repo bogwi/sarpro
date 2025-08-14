@@ -5,7 +5,7 @@ A high-performance Sentinel-1 Synthetic Aperture Radar (SAR) GRD product to imag
 ## Features
 - **Sentinel-1 Support**: Specialized for Sentinel-1 SAR GRD products
 - **Multiple Interfaces**: CLI, GUI, and library APIs
-- **Blazing Fast Performance**: Process dual-band 400MP GRD product images and scale to 4MP (2048x2048) synthetic RGB JPEG with reprojection and padding in just ~1.5 seconds on modern laptops (since v0.2.1, see [CHANGELOG](CHANGELOG.md) for performance details) **THIS IS NOT A TYPO OR JOKE**
+- **Blazing Fast Performance**: Process dual-band 400MP GRD product images and scale to 4MP (2048x2048) synthetic RGB JPEG with reprojection and padding in just **~1.5 seconds** on modern laptops (since v0.2.1, see [CHANGELOG](CHANGELOG.md) for performance details) **THIS IS NOT A TYPO**
 - **Flexible Polarization**: Support for VV, VH, HH, HV, multiband, and polarization operations (sum, difference, ratio, etc.)
 - **Advanced Autoscaling**: Multiple strategies including standard, robust, adaptive, and equalized
 - **Batch Processing**: Process multiple SAFE directories efficiently for ML workflows

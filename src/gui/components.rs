@@ -409,7 +409,7 @@ impl OptionsComponent {
             // Add informative text about the selected strategy
             let strategy_info = match app.autoscale {
                 AutoscaleStrategy::Standard => {
-                    "Standard SAR autoscaling with robust percentiles (2nd/98th). Handles outliers well and adapts to image characteristics (low contrast, heavy-tailed, high dynamic range). Recommended."
+                    "Standard SAR autoscaling with robust percentiles (2nd/98th). Not for synthetic RGB. Recommended for grayscale. Very plain."
                 }
                 AutoscaleStrategy::Robust => {
                     "Robust statistics approach using IQR-based outlier detection. Handles extreme outliers well with 2.5×IQR threshold for clipping."
@@ -462,13 +462,15 @@ impl OptionsComponent {
                             ui.selectable_value(&mut app.resample_alg, "nearest".to_string(), "nearest");
                             ui.selectable_value(&mut app.resample_alg, "bilinear".to_string(), "bilinear");
                             ui.selectable_value(&mut app.resample_alg, "cubic".to_string(), "cubic");
+                            ui.selectable_value(&mut app.resample_alg, "lanczos".to_string(), "lanczos");
                         });
                 });
             });
             let resample_info = match app.resample_alg.as_str() {
                 "nearest" => "Nearest neighbor resampling. Fastest but least accurate.",
                 "bilinear" => "Bilinear resampling. Good balance of speed and accuracy. Default.",
-                "cubic" => "Cubic resampling. Best quality but slowest.",
+                "cubic" => "Cubic resampling. High quality; slower.",
+                "lanczos" => "Lanczos resampling. Very high quality for moderate downscales; can ring on sharp edges.",
                 _ => "Unknown resampling algorithm.",
             };
             ui.label(

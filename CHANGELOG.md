@@ -1,4 +1,18 @@
 ### Changelog
+### [0.2.3] - 2025-08-15 00:21 JST
+
+- **Added**:
+  - Exposed Lanczos resampling as a first-class option in both CLI (`--resample-alg lanczos`) and GUI. Recommended for moderate downscales when maximum sharpness is desired.
+
+- **Changed**:
+  - Improved visual quality for native (no-warp) downsamples: automatically choose a higher-quality GDAL resampler when shrinking aggressively (Average for ≥4× reduction; otherwise Lanczos) unless the user explicitly sets `--resample-alg`.
+
+- **Performance**:
+  - Maintains the fast pipeline introduced in 0.2.1–0.2.2 while restoring visually clean native outputs; no measurable regression in end-to-end timing.
+
+- **Release notes**:
+  - 0.2.1 and 0.2.2 remain marked as unreleased internal optimization milestones. 0.2.3 rolls up user-visible improvements and is released.
+
 
 All notable changes to this project will be documented in this file.
 

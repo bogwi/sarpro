@@ -76,6 +76,7 @@ fn process_single_file(
                     Some("nearest") => Some(ResampleAlg::NearestNeighbour),
                     Some("bilinear") => Some(ResampleAlg::Bilinear),
                     Some("cubic") => Some(ResampleAlg::Cubic),
+                    Some("lanczos") => Some(ResampleAlg::Lanczos),
                     _ => None,
                 };
                 if let Some(tgt) = target_crs {

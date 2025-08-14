@@ -1078,8 +1078,22 @@ impl SafeReader {
             let scale = (ts as f64 / long_side as f64).min(1.0);
             let out_cols = ((orig_cols as f64) * scale).round().max(1.0) as usize;
             let out_rows = ((orig_rows as f64) * scale).round().max(1.0) as usize;
+            // Choose a high-quality downsampling filter when shrinking aggressively.
+            // Respect user-provided resampling if any; otherwise, use Lanczos for mild downscale,
+            // and Average for heavy downscale to suppress aliasing/speckle.
+            let reduction = (orig_cols.max(orig_rows) as f64 / ts as f64).max(1.0);
+            let chosen_alg = match resample_alg {
+                Some(alg) => alg,
+                None => {
+                    if reduction >= 4.0 {
+                        ResampleAlg::Average
+                    } else {
+                        ResampleAlg::Lanczos
+                    }
+                }
+            };
             let arr_f64 = gdal_reader
-                .read_band_resampled(1, out_cols, out_rows, Some(ResampleAlg::NearestNeighbour))
+                .read_band_resampled(1, out_cols, out_rows, Some(chosen_alg))
                 .map_err(|e| SafeError::Parse(format!("GDAL error: {}", e)))?;
             metadata.lines = out_rows;
             metadata.samples = out_cols;

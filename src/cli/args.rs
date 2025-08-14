@@ -66,7 +66,7 @@ pub struct CliArgs {
     #[arg(long)]
     pub target_crs: Option<String>,
 
-    /// Optional resampling algorithm (nearest, bilinear, cubic)
+    /// Optional resampling algorithm (nearest, bilinear, cubic, lanczos)
     #[arg(long)]
     pub resample_alg: Option<String>,
 }

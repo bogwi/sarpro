@@ -1,6 +1,6 @@
 [package]
 name = "sarpro"
-version = "0.2.0"
+version = "0.2.3"
 edition = "2024"
 description = "A high-performance Sentinel-1 Synthetic Aperture Radar (SAR) GRD product to image processor."
 authors = ["Dan Vi <bogwi@rakumail.jp>"]
