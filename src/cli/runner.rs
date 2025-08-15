@@ -55,19 +55,34 @@ fn process_single_file(
 
     let reader = if batch_mode {
         match input_format {
-            InputFormat::Safe => match SafeReader::open_with_warnings_with_options(
-                input,
-                polarization_str,
-                None,
-                None,
-                target_size,
-            )? {
+            InputFormat::Safe => {
+                // Map resample algorithm
+                let resample = match resample_alg {
+                    Some("nearest") => Some(ResampleAlg::NearestNeighbour),
+                    Some("bilinear") => Some(ResampleAlg::Bilinear),
+                    Some("cubic") => Some(ResampleAlg::Cubic),
+                    Some("lanczos") => Some(ResampleAlg::Lanczos),
+                    _ => None,
+                };
+                // Map target CRS with 'none' disabling reprojection
+                let tgt_opt = match target_crs {
+                    Some(t) if !t.eq_ignore_ascii_case("none") => Some(t),
+                    _ => None,
+                };
+                match SafeReader::open_with_warnings_with_options(
+                    input,
+                    polarization_str,
+                    tgt_opt,
+                    resample,
+                    target_size,
+                )? {
                 Some(reader) => reader,
                 None => {
                     warn!("Skipping unsupported product type: {:?}", input);
                     return Ok(());
                 }
-            },
+            }
+        }
         }
     } else {
         match input_format {

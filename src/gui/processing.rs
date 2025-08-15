@@ -198,11 +198,24 @@ impl SarproGui {
             match input_format {
                 InputFormat::Safe => {
                     trace!("Opening SAFE file in batch mode: {:?}", input);
+                    // In batch mode, honor target CRS and resample algorithm similarly to single-file mode
+                    let resample = match self.resample_alg.trim().to_lowercase().as_str() {
+                        "nearest" => Some(gdal::raster::ResampleAlg::NearestNeighbour),
+                        "cubic" => Some(gdal::raster::ResampleAlg::Cubic),
+                        "lanczos" => Some(gdal::raster::ResampleAlg::Lanczos),
+                        _ => Some(gdal::raster::ResampleAlg::Bilinear),
+                    };
+                    let trimmed = self.target_crs.trim();
+                    let tgt_opt = if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") {
+                        None
+                    } else {
+                        Some(trimmed)
+                    };
                     match SafeReader::open_with_warnings_with_options(
                         input,
                         polarization_str,
-                        None,
-                        None,
+                        tgt_opt,
+                        resample,
                         target_size,
                     )? {
                         Some(reader) => {

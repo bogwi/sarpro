@@ -14,6 +14,9 @@
 - **Compatibility**:
   - Public API unchanged; behavior is equivalent with minor percentile estimation differences well below visual significance.
 
+- **Fixed**:
+  - Reprojection in batch mode: `--target-crs` and `--resample-alg` were ignored when `--batch` (and in GUI batch). Now both CLI (`src/cli/runner.rs`) and GUI (`src/gui/processing.rs`) honor target CRS and resampling in batch processing by passing them into `SafeReader::open_with_warnings_with_options(...)`.
+
 ### [0.2.3] - 2025-08-15 00:21 JST
 
 - **Added**:
