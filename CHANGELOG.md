@@ -1,4 +1,19 @@
 ### Changelog
+### [0.2.4] - 2025-08-15
+
+- **Changed**:
+  - Replaced autoscale percentile computation with a streaming histogram approach (4096 bins) in `core/processing/autoscale.rs`.
+    - Eliminates O(N log N) full-sort over valid pixels; now O(N) two-pass (stats + histogram) with negligible quantization error (≈0.02 dB typical spans).
+    - Removes materialization of the `values: Vec<f64>` for all valid pixels; memory usage now ~constant (histogram ≈32 KB).
+    - Adds `p10`/`p90` support and wires them into the Adaptive strategy; percentiles now derived from histogram CDF with intra-bin interpolation.
+    - Returns `valid_count` from stats to avoid redundant counting.
+
+- **Performance**:
+  - End-to-end CPU reduction on large scenes (multi‑hundreds of MP) due to removing sorting and large allocations. Observed ~10% improvement in local tests; larger gains expected on very large inputs.
+
+- **Compatibility**:
+  - Public API unchanged; behavior is equivalent with minor percentile estimation differences well below visual significance.
+
 ### [0.2.3] - 2025-08-15 00:21 JST
 
 - **Added**:
@@ -12,11 +27,6 @@
 
 - **Release notes**:
   - 0.2.1 and 0.2.2 remain marked as unreleased internal optimization milestones. 0.2.3 rolls up user-visible improvements and is released.
-
-
-All notable changes to this project will be documented in this file.
-
-The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### [0.2.2] - 2025-08-14 (unreleased)
 

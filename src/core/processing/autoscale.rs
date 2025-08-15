@@ -3,6 +3,162 @@ use tracing::{debug, info};
 
 use crate::{AutoscaleStrategy, BitDepth};
 
+/// Simple statistics and percentile estimates computed from a streaming histogram.
+struct HistogramStats {
+    valid_count: usize,
+    min_db: f64,
+    max_db: f64,
+    mean_db: f64,
+    std_db: f64,
+    median_db: f64,
+    p01: f64,
+    p02: f64,
+    p05: f64,
+    p10: f64,
+    p25: f64,
+    p75: f64,
+    p90: f64,
+    p95: f64,
+    p98: f64,
+    p99: f64,
+}
+
+#[inline]
+fn approx_eq(a: f64, b: f64) -> bool {
+    (a - b).abs() < 1e-9_f64
+}
+
+/// Compute robust percentiles and basic stats without materializing/sorting all values.
+/// Two-pass approach:
+///   1) Find min/max and Welford mean/std in a single pass over valid pixels
+///   2) Build a fixed-bin histogram over [min,max] and invert CDF for requested percentiles
+fn compute_histogram_stats(db: &Array2<f64>, valid_mask: &[bool]) -> HistogramStats {
+    // First pass: min/max + Welford mean/std
+    let mut count: u64 = 0;
+    let mut min_db = f64::INFINITY;
+    let mut max_db = f64::NEG_INFINITY;
+    let mut mean = 0.0_f64;
+    let mut m2 = 0.0_f64; // Sum of squares of differences from the current mean
+
+    for ((i, j), &v) in db.indexed_iter() {
+        if valid_mask[i * db.ncols() + j] {
+            count += 1;
+            if v < min_db { min_db = v; }
+            if v > max_db { max_db = v; }
+
+            // Welford's online algorithm
+            let delta = v - mean;
+            mean += delta / (count as f64);
+            let delta2 = v - mean;
+            m2 += delta * delta2;
+        }
+    }
+
+    if count == 0 {
+        return HistogramStats {
+            valid_count: 0,
+            min_db: 0.0,
+            max_db: 0.0,
+            mean_db: 0.0,
+            std_db: 0.0,
+            median_db: 0.0,
+            p01: 0.0,
+            p02: 0.0,
+            p05: 0.0,
+            p10: 0.0,
+            p25: 0.0,
+            p75: 0.0,
+            p90: 0.0,
+            p95: 0.0,
+            p98: 0.0,
+            p99: 0.0,
+        };
+    }
+
+    let std_db = if count > 1 { (m2 / (count as f64)).sqrt() } else { 0.0 };
+
+    // Handle degenerate case: all values are equal
+    if (max_db - min_db).abs() < f64::EPSILON {
+        return HistogramStats {
+            valid_count: count as usize,
+            min_db,
+            max_db,
+            mean_db: mean,
+            std_db,
+            median_db: min_db,
+            p01: min_db,
+            p02: min_db,
+            p05: min_db,
+            p10: min_db,
+            p25: min_db,
+            p75: max_db,
+            p90: max_db,
+            p95: max_db,
+            p98: max_db,
+            p99: max_db,
+        };
+    }
+
+    // Second pass: histogram over [min,max]
+    const NUM_BINS: usize = 4096;
+    let mut hist: [u64; NUM_BINS] = [0; NUM_BINS];
+    let span = max_db - min_db;
+    let inv_span = 1.0 / span;
+
+    for ((i, j), &v) in db.indexed_iter() {
+        if !valid_mask[i * db.ncols() + j] {
+            continue;
+        }
+        // Map v ∈ [min,max] into bin 0..NUM_BINS-1 (inclusive)
+        let t = ((v - min_db) * inv_span).clamp(0.0, 1.0);
+        let mut idx = (t * (NUM_BINS as f64)) as usize;
+        if idx >= NUM_BINS { idx = NUM_BINS - 1; }
+        hist[idx] += 1;
+    }
+
+    // Helper to invert CDF and estimate percentile value using linear interpolation within the bin
+    let estimate_percentile = |p: f64| -> f64 {
+        let n = count; // number of valid samples
+        // Match previous behavior roughly: idx = floor(n * p), then clamp to [0, n-1]
+        let mut target = (p * (n as f64)).floor() as u64;
+        if target >= n { target = n - 1; }
+
+        let mut cumsum: u64 = 0;
+        for (b, &h) in hist.iter().enumerate() {
+            let next = cumsum + h;
+            if target < next {
+                let within = target.saturating_sub(cumsum);
+                let frac = if h > 0 { (within as f64) / (h as f64) } else { 0.0 };
+                let bin_width = span / (NUM_BINS as f64);
+                let bin_start = min_db + (b as f64) * bin_width;
+                return bin_start + frac * bin_width;
+            }
+            cumsum = next;
+        }
+        // Fallback (should not happen): return max
+        max_db
+    };
+
+    HistogramStats {
+        valid_count: count as usize,
+        min_db,
+        max_db,
+        mean_db: mean,
+        std_db,
+        median_db: estimate_percentile(0.5),
+        p01: estimate_percentile(0.01),
+        p02: estimate_percentile(0.02),
+        p05: estimate_percentile(0.05),
+        p10: estimate_percentile(0.10),
+        p25: estimate_percentile(0.25),
+        p75: estimate_percentile(0.75),
+        p90: estimate_percentile(0.90),
+        p95: estimate_percentile(0.95),
+        p98: estimate_percentile(0.98),
+        p99: estimate_percentile(0.99),
+    }
+}
+
 /// Scale U16 to U8, used for resizing U16 images to U8
 pub fn scale_u16_to_u8(data: &[u16]) -> Vec<u8> {
     if data.is_empty() {
@@ -30,36 +186,22 @@ pub fn autoscale_db_image(
     _valid_db: &[f64], // Kept for API compatibility
     bit_depth: BitDepth,
 ) -> Vec<u16> {
-    use std::f64;
+    // Fast O(N) stats and percentiles
+    let stats = compute_histogram_stats(db, valid_mask);
 
-    // Collect valid values and compute robust statistics
-    let mut values = Vec::new();
-    for ((i, j), &v) in db.indexed_iter() {
-        if valid_mask[i * db.ncols() + j] {
-            values.push(v);
-        }
-    }
-
-    if values.is_empty() {
+    if stats.valid_count == 0 {
         return vec![0u16; db.len()];
     }
 
-    values.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let n = values.len();
-
-    let min_db = values[0];
-    let max_db = values[n - 1];
-    let mean_db = values.iter().sum::<f64>() / n as f64;
-    let median_db = values[n / 2];
-    let std_db = (values.iter().map(|&v| (v - mean_db).powi(2)).sum::<f64>() / n as f64).sqrt();
-
-    // Use more robust percentiles for SAR data
-    let p02 = values[(n as f64 * 0.02) as usize];
-    let _p05 = values[(n as f64 * 0.05) as usize];
-    let p25 = values[(n as f64 * 0.25) as usize];
-    let p75 = values[(n as f64 * 0.75) as usize];
-    let _p95 = values[(n as f64 * 0.95) as usize];
-    let p98 = values[(n as f64 * 0.98) as usize];
+    let min_db = stats.min_db;
+    let max_db = stats.max_db;
+    let mean_db = stats.mean_db;
+    let median_db = stats.median_db;
+    let std_db = stats.std_db;
+    let p02 = stats.p02;
+    let p25 = stats.p25;
+    let p75 = stats.p75;
+    let p98 = stats.p98;
 
     let max_val = match bit_depth {
         BitDepth::U8 => 255.0,
@@ -130,40 +272,29 @@ pub fn autoscale_db_image_advanced(
     bit_depth: BitDepth,
     strategy: AutoscaleStrategy, // robust, adaptive, equalized, tamed, default
 ) -> Vec<u16> {
-    use std::f64;
-
     let max_val = match bit_depth {
         BitDepth::U8 => 255.0,
         BitDepth::U16 => 65535.0,
     };
 
-    // Collect valid values and compute comprehensive statistics
-    let mut values = Vec::new();
-    for ((i, j), &v) in db.indexed_iter() {
-        if valid_mask[i * db.ncols() + j] {
-            values.push(v);
-        }
-    }
+    // Fast O(N) stats and percentiles
+    let stats = compute_histogram_stats(db, valid_mask);
 
-    if values.is_empty() {
+    if stats.valid_count == 0 {
         return vec![0u16; db.len()];
     }
 
-    values.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let n = values.len();
-
-    let min_db = values[0];
-    let max_db = values[n - 1];
-    let mean_db = values.iter().sum::<f64>() / n as f64;
-    let median_db = values[n / 2];
-    let std_db = (values.iter().map(|&v| (v - mean_db).powi(2)).sum::<f64>() / n as f64).sqrt();
-
-    let p01 = values[(n as f64 * 0.01) as usize];
-    let p05 = values[(n as f64 * 0.05) as usize];
-    let p25 = values[(n as f64 * 0.25) as usize];
-    let p75 = values[(n as f64 * 0.75) as usize];
-    let p95 = values[(n as f64 * 0.95) as usize];
-    let p99 = values[(n as f64 * 0.99) as usize];
+    let min_db = stats.min_db;
+    let max_db = stats.max_db;
+    let mean_db = stats.mean_db;
+    let median_db = stats.median_db;
+    let std_db = stats.std_db;
+    let p01 = stats.p01;
+    let p05 = stats.p05;
+    let p25 = stats.p25;
+    let p75 = stats.p75;
+    let p95 = stats.p95;
+    let p99 = stats.p99;
 
     let dynamic_range = max_db - min_db;
     let iqr = p75 - p25;
@@ -204,10 +335,21 @@ pub fn autoscale_db_image_advanced(
                 (0.05, 0.95, 1.0)
             };
 
-            let low_idx = ((n as f64 * low_pct) as usize).min(n - 1);
-            let high_idx = ((n as f64 * high_pct) as usize).min(n - 1);
-            let low = values[low_idx];
-            let high = values[high_idx];
+            // Use histogram-estimated percentiles
+            let low = if approx_eq(low_pct, 0.10) { stats.p10 }
+                      else if approx_eq(low_pct, 0.02) { stats.p02 }
+                      else if approx_eq(low_pct, 0.05) { stats.p05 }
+                      else if approx_eq(low_pct, 0.25) { stats.p25 }
+                      else if approx_eq(low_pct, 0.75) { stats.p75 }
+                      else if approx_eq(low_pct, 0.95) { stats.p95 }
+                      else if approx_eq(low_pct, 0.99) { stats.p99 }
+                      else { stats.p05 };
+            let high = if approx_eq(high_pct, 0.90) { stats.p90 }
+                       else if approx_eq(high_pct, 0.98) { stats.p98 }
+                       else if approx_eq(high_pct, 0.95) { stats.p95 }
+                       else if approx_eq(high_pct, 0.75) { stats.p75 }
+                       else if approx_eq(high_pct, 0.99) { stats.p99 }
+                       else { stats.p95 };
             (low, high, gamma_adj, true)
         }
         AutoscaleStrategy::Equalized => {
