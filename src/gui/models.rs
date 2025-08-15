@@ -334,20 +334,23 @@ impl SarproGui {
     }
 
     pub fn generate_cli_command(&self) -> String {
-        let mut cmd = String::from("sarpro");
+        let mut cmd = String::from("cargo run --release --bin sarpro --");
 
-        // Add input/output paths
-        if let Some(input_path) = &self.input_path {
-            cmd.push_str(&format!(" --input {:?} ", input_path));
-        }
-        if let Some(input_dir) = &self.input_dir_path {
-            cmd.push_str(&format!(" --input-dir {:?}", input_dir));
-        }
-        if let Some(output_path) = &self.output_path {
-            cmd.push_str(&format!(" --output {:?}", output_path));
-        }
-        if let Some(output_dir) = &self.output_dir_path {
-            cmd.push_str(&format!(" --output-dir {:?}", output_dir));
+        // Add input/output paths depending on the mode to avoid mixing single and batch flags
+        if self.batch_mode {
+            if let Some(input_dir) = &self.input_dir_path {
+                cmd.push_str(&format!(" --input-dir {:?}", input_dir));
+            }
+            if let Some(output_dir) = &self.output_dir_path {
+                cmd.push_str(&format!(" --output-dir {:?}", output_dir));
+            }
+        } else {
+            if let Some(input_path) = &self.input_path {
+                cmd.push_str(&format!(" --input {:?}", input_path));
+            }
+            if let Some(output_path) = &self.output_path {
+                cmd.push_str(&format!(" --output {:?}", output_path));
+            }
         }
 
         // Add format options

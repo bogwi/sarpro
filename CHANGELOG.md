@@ -16,6 +16,7 @@
 
 - **Fixed**:
   - Reprojection in batch mode: `--target-crs` and `--resample-alg` were ignored when `--batch` (and in GUI batch). Now both CLI (`src/cli/runner.rs`) and GUI (`src/gui/processing.rs`) honor target CRS and resampling in batch processing by passing them into `SafeReader::open_with_warnings_with_options(...)`.
+  - GUI command generation: `generate_cli_command()` now respects the active mode and avoids mixing `--input/--output` with `--input-dir/--output-dir`. Also prefixes the command with `cargo run --release --bin sarpro --` to allow direct copy-paste execution during development.
 
 ### [0.2.3] - 2025-08-15 00:21 JST
 
