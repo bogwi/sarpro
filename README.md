@@ -14,15 +14,15 @@ A high-performance Sentinel-1 Synthetic Aperture Radar (SAR) GRD product to imag
 - **I/O Optimized**: Performance typically limited by disk I/O, not CPU processing
 - **since v0.2.0 (unreleased)**: Can now reproject to any CRS and resample with nearest, bilinear, or cubic algorithms
 
-## ROADMAP and ROADMAP_expained are FIRST THING TO READ
-See [ROADMAP.md](ROADMAP.md) for the high‑level phases and upcoming features. See [ROADMAP_expained.md](ROADMAP_expained.md) for the detailed technical explanation. This highlights what’s coming (COG/STAC, masking, speckle filters, DEM‑based RTC, tiling, time‑series) and expected release groupings.
+## ROADMAP and ROADMAP_explained
+See [ROADMAP.md](ROADMAP.md) for the high‑level phases and upcoming features. See [ROADMAP_explained.md](ROADMAP_explained.md) for the detailed technical explanation. This highlights what’s coming (COG/STAC, masking, speckle filters, DEM‑based RTC, tiling, time‑series) and expected release groupings.
 
-*Note 1: The ROADMAP and its technical explanation might change at any moment prioritizing some features over others or adding new ones and slicing some out. Yet it was created to be a *minimal-refactor* plan and as orgranic as possible, though not a contract.*
+*Note 1: The ROADMAP and its technical explanation might change at any moment prioritizing some features over others or adding new ones and slicing some out. Yet it was created to be a minimal-refactor plan and as orgranic as possible, though not a contract.*
 
 *Note 2: The ROADMAP and its technical explanation can have mistakes and knowledge gaps which as my understanding of the project deepens will be eliminated or treated as opinionated.*
 
-## CHANGELOG IS SECOND THING TO READ
-Till the project in not version 1.0.0, always visit [CHANGELOG.md](CHANGELOG.md) for the full changelog. *The updating aims to be complementary and not breaking were possible, yet the API is still experimental and may evolve. GUI most likely will be the first to be updated with new features and improvements.*
+## CHANGELOG
+Visit [CHANGELOG.md](CHANGELOG.md) to track the changes. 
 
 ## Best Usage Practices
 
@@ -458,19 +458,6 @@ flowchart TB
   M -- "JPEG (gray/synRGB)" --> P["Write JPEG"]
   P --> Q["Sidecars: .json (metadata), .jgw/.wld, .prj"]
 ```
-
-## Roadmap
-
-### Before v1.0.0
-- **Enhanced Color Combinations**: Additional color schemes similar to Copernicus Browser
-- **Tiling Support**: Divide large SAR scenes into smaller tiles for easier processing and ML training
-- **Parallel Workflows**: Multiple independent conversion processes running simultaneously within the same application
-- **Polarimetric Indices**: Complete support for advanced indices including RVI, PR, CPD, and more
-- **RDTC/orthorectification | DEM‑based terrain correction**: yes.
-
-### Future Versions
-- **v2.x**: Possible SLC (Single Look Complex) product support
-- **v3.x**: Possible Level-0 RAW support for advanced users
 
 ## Troubleshooting (GDAL)
 

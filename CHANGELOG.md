@@ -1,4 +1,13 @@
 ### Changelog
+
+### [0.2.6] - 2025-08-16
+
+- **Updated**:
+  - `README.md` for clarity and consistency.
+
+- **Notes**:
+  - This is a documentation update only. No functional code changes vs 0.2.4.
+
 ### [0.2.5] - 2025-08-16
 
 - **Added**:
