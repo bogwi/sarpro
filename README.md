@@ -14,10 +14,38 @@ A high-performance Sentinel-1 Synthetic Aperture Radar (SAR) GRD product to imag
 - **I/O Optimized**: Performance typically limited by disk I/O, not CPU processing
 - **since v0.2.0 (unreleased)**: Can now reproject to any CRS and resample with nearest, bilinear, or cubic algorithms
 
-## CHANGELOG IS FIRST THING TO READ
+## ROADMAP and ROADMAP_expained are FIRST THING TO READ
+See [ROADMAP.md](ROADMAP.md) for the high‑level phases and upcoming features. See [ROADMAP_expained.md](ROADMAP_expained.md) for the detailed technical explanation. This highlights what’s coming (COG/STAC, masking, speckle filters, DEM‑based RTC, tiling, time‑series) and expected release groupings.
+
+*Note 1: The ROADMAP and its technical explanation might change at any moment prioritizing some features over others or adding new ones and slicing some out. Yet it was created to be a *minimal-refactor* plan and as orgranic as possible, though not a contract.*
+
+*Note 2: The ROADMAP and its technical explanation can have mistakes and knowledge gaps which as my understanding of the project deepens will be eliminated or treated as opinionated.*
+
+## CHANGELOG IS SECOND THING TO READ
 Till the project in not version 1.0.0, always visit [CHANGELOG.md](CHANGELOG.md) for the full changelog. *The updating aims to be complementary and not breaking were possible, yet the API is still experimental and may evolve. GUI most likely will be the first to be updated with new features and improvements.*
 
 ## Best Usage Practices
+
+### What SARPRO Can Do Now
+
+- **Convert Sentinel‑1 GRD .SAFE to map‑ready GeoTIFFs (u8/u16)**: Single‑band VV/VH/HH/HV or dual‑band multiband TIFFs with embedded geotransform/projection. Optional reprojection to a target CRS (e.g., `EPSG:4326`, `EPSG:32633`) with `--target-crs` and resampling (`--resample-alg nearest|bilinear|cubic|lanczos`).
+- **Produce high‑quality quicklooks (JPEG) with sidecars**: Grayscale or synthetic RGB JPEGs, plus `.json` metadata, `.jgw/.wld` worldfile, and `.prj` projection. Great for catalogs and reports.
+- **Generate synthetic RGB from dual‑pol scenes**: Combine co‑pol and cross‑pol pairs (VV+VH or HH+HV) into visually compelling composites for exploration and communication.
+- **Run polarization math for feature exploration**: Output SAR‑specific gray products from `sum`, `diff`, `ratio`, `n-diff`, and `log-ratio` on available pairs (VV/VH or HH/HV) to emphasize scattering differences.
+- **Batch‑process folders of SAFE robustly**: Convert many products in one run with `--batch` and `--input-dir/--output-dir`, continue on errors, and get per‑run summaries.
+- **Downsample huge rasters on read efficiently**: Read bands directly at the requested output size (long‑side `--size`), minimizing I/O and memory. Choose resampling quality; Lanczos and Average are used appropriately when shrinking (v0.2.3+).
+- **Resize/pad to consistent shapes for ML**: Standardize outputs to 512/1024/2048 (or custom) and `--pad` to square for CNN‑friendly datasets.
+- **Preserve native geometry when needed**: Skip reprojection with `--target-crs none` to avoid any resampling (better for quantitative pixel comparisons and downstream co‑registration pipelines).
+- **Embed and export georeferencing correctly**: TIFFs carry affine transform and projection; JPEGs ship with world/projection files and JSON metadata.
+- **Use a GUI for local, interactive runs**: Select SAFE folders, tweak parameters, monitor progress, and auto‑generate equivalent CLI commands.
+- **Integrate as a Rust library**: Call the typed API to get in‑memory buffers or write outputs directly from your application, reusing SARPRO’s autoscaling and writers.
+
+Where SARPRO v0.2.4 fits today (GRD):
+- **Exploratory analysis and visualization**: Rapidly turn SAFE into publication‑quality figures and synRGB quicklooks for urban, agriculture, water, and disaster contexts.
+- **Internal data catalogs**: Generate standardized JPEG quicklooks and GeoTIFFs with consistent sizing for fast browsing and indexing.
+- **ML dataset preparation**: Create reproducible grayscale or multiband inputs with fixed sizes/padding, ready for training/evaluation.
+- **Map overlays and GIS**: Reproject to a target CRS for drop‑in alignment in QGIS or web maps; or keep native geometry for quantitative pipelines.
+- **Polarization‑based feature engineering**: Produce ratio/log‑ratio/n‑diff layers to prototype features for downstream models.
 
 ### When to Use Each Interface
 

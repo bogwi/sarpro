@@ -44,7 +44,7 @@ pub struct CliArgs {
     pub autoscale: AutoscaleStrategy,
 
     /// Image size for scaling. Options:
-    /// - Predefined: 224, 256, 384, 512, 768, 1024, 2048, 4096
+    /// - Predefined: 512, 1024, 2048
     /// - Custom: any positive integer (e.g., 1536)
     /// - Original: "original" (no scaling)
     #[arg(long, default_value = "original")]

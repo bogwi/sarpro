@@ -1,4 +1,14 @@
 ### Changelog
+### [0.2.5] - 2025-08-16
+
+- **Added**:
+  - New public roadmap: `ROADMAP.md` with phased plan and tentative release targets.
+  - New long‑form developer guide: `ROADMAP_explained.md` — deep technical explanation of each phase with diagrams and implementation notes.
+  - Extended README “Best Usage Practices” with “What SARPRO Can Do Now” — concrete, real‑world tasks supported in v0.2.4 for GRD.
+
+- **Notes**:
+  - This is a documentation/roadmap update only. No functional code changes vs 0.2.4.
+
 ### [0.2.4] - 2025-08-15
 
 - **Changed**:
