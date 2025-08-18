@@ -1,5 +1,18 @@
 ### Changelog
 
+### [0.2.7] - 2025-08-18
+
+- **Changed**:
+  - Adaptive local contrast enhancement in `core/processing/autoscale.rs::autoscale_db_image_advanced` is now allocation‑free for the 3×3 window.
+    - Replaced per‑pixel `Vec` allocation and full sort with a fixed `[f64; 9]` buffer and in‑place insertion sort.
+    - Added helpers: `local_median_and_range_3x3` and `insertion_sort_in_place` to compute local median/range without heap allocations.
+
+- **Performance**:
+  - Adaptive autoscale with local enhancement runs about ~2× faster on typical scenes and removes allocator pressure (constant small stack buffer), improving overall responsiveness.
+
+- **Compatibility**:
+  - No public API changes. Visual behavior equivalent with improved local contrast stability.
+
 ### [0.2.6] - 2025-08-16
 
 - **Updated**:

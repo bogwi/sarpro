@@ -159,6 +159,59 @@ fn compute_histogram_stats(db: &Array2<f64>, valid_mask: &[bool]) -> HistogramSt
     }
 }
 
+#[inline]
+fn insertion_sort_in_place(values: &mut [f64]) {
+    for i in 1..values.len() {
+        let key = values[i];
+        let mut j = i;
+        while j > 0 && values[j - 1] > key {
+            values[j] = values[j - 1];
+            j -= 1;
+        }
+        values[j] = key;
+    }
+}
+
+#[inline]
+fn local_median_and_range_3x3(
+    db: &Array2<f64>,
+    valid_mask: &[bool],
+    row: usize,
+    col: usize,
+) -> Option<(f64, f64)> {
+    let rows = db.nrows();
+    let cols = db.ncols();
+
+    let mut buf: [f64; 9] = [0.0; 9];
+    let mut count: usize = 0;
+
+    let r0 = row.saturating_sub(1);
+    let c0 = col.saturating_sub(1);
+    let r1 = (row + 1).min(rows - 1);
+    let c1 = (col + 1).min(cols - 1);
+
+    for r in r0..=r1 {
+        for c in c0..=c1 {
+            let idx = r * cols + c;
+            if valid_mask[idx] {
+                buf[count] = db[(r, c)];
+                count += 1;
+            }
+        }
+    }
+
+    if count == 0 {
+        return None;
+    }
+
+    let slice = &mut buf[..count];
+    insertion_sort_in_place(slice);
+
+    let median = slice[count / 2];
+    let range = slice[count - 1] - slice[0];
+    Some((median, range))
+}
+
 /// Scale U16 to U8, used for resizing U16 images to U8
 pub fn scale_u16_to_u8(data: &[u16]) -> Vec<u8> {
     if data.is_empty() {
@@ -385,51 +438,33 @@ pub fn autoscale_db_image_advanced(
     if use_local_enhancement {
         // Apply local contrast enhancement for better detail visibility
         debug!("Applying local contrast enhancement");
-        let window_size = 3; // 3x3 window for local enhancement
-        let half_window = window_size / 2;
-
+        let cols = db.ncols();
         for ((i, j), &v) in db.indexed_iter() {
-            if !valid_mask[i * db.ncols() + j] {
+            if !valid_mask[i * cols + j] {
                 result.push(0u16);
                 continue;
             }
 
-            // Local contrast enhancement
-            let mut local_values = Vec::new();
-            for di in -(half_window as isize)..=(half_window as isize) {
-                for dj in -(half_window as isize)..=(half_window as isize) {
-                    let ni = i as isize + di;
-                    let nj = j as isize + dj;
-                    if ni >= 0 && ni < db.nrows() as isize && nj >= 0 && nj < db.ncols() as isize {
-                        let idx = (ni as usize) * db.ncols() + (nj as usize);
-                        if valid_mask[idx] {
-                            local_values.push(db[(ni as usize, nj as usize)]);
-                        }
-                    }
+            let (local_median, local_range) = match local_median_and_range_3x3(db, valid_mask, i, j) {
+                Some((m, r)) => (m, r),
+                None => {
+                    let clipped = v.max(low_clip).min(high_clip);
+                    let normalized = ((clipped - low_clip) / range).powf(gamma);
+                    result.push((normalized * max_val).clamp(0.0, max_val) as u16);
+                    continue;
                 }
-            }
+            };
 
-            if !local_values.is_empty() {
-                local_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                let local_median = local_values[local_values.len() / 2];
-                let local_range = local_values.last().unwrap() - local_values.first().unwrap();
-
-                // Adjust based on local statistics
-                let local_factor = if local_range > 0.0 {
-                    1.0 + 0.1 * (v - local_median) / local_range
-                } else {
-                    1.0
-                };
-
-                let adjusted_v = v * local_factor;
-                let clipped = adjusted_v.max(low_clip).min(high_clip);
-                let normalized = ((clipped - low_clip) / range).powf(gamma);
-                result.push((normalized * max_val).clamp(0.0, max_val) as u16);
+            let local_factor = if local_range > 0.0 {
+                1.0 + 0.1 * (v - local_median) / local_range
             } else {
-                let clipped = v.max(low_clip).min(high_clip);
-                let normalized = ((clipped - low_clip) / range).powf(gamma);
-                result.push((normalized * max_val).clamp(0.0, max_val) as u16);
-            }
+                1.0
+            };
+
+            let adjusted_v = v * local_factor;
+            let clipped = adjusted_v.max(low_clip).min(high_clip);
+            let normalized = ((clipped - low_clip) / range).powf(gamma);
+            result.push((normalized * max_val).clamp(0.0, max_val) as u16);
         }
     } else {
         // Standard scaling
