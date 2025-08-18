@@ -533,7 +533,8 @@ pub fn autoscale_db_image_advanced(
                        else if approx_eq(high_pct, 0.75) { stats.p75 }
                        else if approx_eq(high_pct, 0.99) { stats.p99 }
                        else { stats.p95 };
-            (low, high, gamma_adj, true)
+            // Disable local enhancement (non-physical in dB). For local contrast, use CLAHE.
+            (low, high, gamma_adj, false)
         }
         AutoscaleStrategy::Equalized => {
             debug!("Equalized SAR scaling");

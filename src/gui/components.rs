@@ -416,13 +416,13 @@ impl OptionsComponent {
                     "Robust statistics approach using IQR-based outlier detection. Handles extreme outliers well with 2.5×IQR threshold for clipping."
                 }
                 AutoscaleStrategy::Adaptive => {
-                    "Adaptive scaling based on image characteristics. Analyzes skewness and tail heaviness to automatically adjust percentiles and gamma correction. Slow. Use default or standard for speed."
+                    "Adaptive scaling based on image characteristics (percentiles + gamma). Local enhancement is disabled; use CLAHE for local contrast."
                 }
                 AutoscaleStrategy::Equalized => {
                     "Histogram equalization approach using 1st/99th percentiles. Provides maximum enhancement of even the darkest pixels."
                 }
                 AutoscaleStrategy::Clahe => {
-                    "Contrast Limited AHE (CLAHE): local histogram equalization with clipping to avoid speckle over-enhancement. Recommended for quicklooks when more local contrast is desired."
+                    "Contrast Limited AHE (CLAHE) on post-stretch grayscale with clipping (speckle-aware). Recommended for quicklooks when local contrast is desired."
                 }
                 AutoscaleStrategy::Tamed => {
                     "Tamed scaling based on 25th/99th percentiles. Provides maximum contrast enhancement for visualization. Recommended for synRGB and the first to try."
