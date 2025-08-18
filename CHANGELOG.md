@@ -1,6 +1,6 @@
 ### Changelog
 
-### [0.2.10] - 2025-08-18
+### [0.2.10] - 2025-08-18 (Unpublished)
 
 - **Changed**:
   - Implemented optimization Step 8 (Synthetic RGB `powf` hot loop → LUT) in `core/processing/synthetic_rgb.rs::create_synthetic_rgb`.
@@ -12,14 +12,23 @@
   - Implemented optimization Padding-row-copies in `core/processing/padding.rs::add_padding_to_square`.
     - Replaced double nested per‑pixel loops with per‑row `copy_from_slice` for both `u8` and `u16` paths.
     - Compute a single destination offset per row; corrected final dimensions log to `max_dim x max_dim`.
+  - Implemented optimization dB conversion + mask single pass in `core/processing/pipeline.rs`.
+    - `process_scalar_data_inplace`: single pass over contiguous slice (when available) to compute dB and validity mask; fallback to indexed iteration maintained for non‑contiguous cases.
+    - `process_scalar_data_pipeline`: removed materialization of `valid_db` vector.
+    - Dropped `valid_db` parameter from autoscale functions and updated call sites:
+      - `autoscale_db_image_to_bitdepth(db, valid_mask, bit_depth)`
+      - `autoscale_db_image(db, valid_mask, bit_depth)`
+      - `autoscale_db_image_to_bitdepth_advanced(db, valid_mask, bit_depth, strategy)`
+      - `autoscale_db_image_advanced(db, valid_mask, bit_depth, strategy)`
 
 - **Performance**:
   - Eliminates scalar `powf` in the tight pixel loop; the synRGB stage is now memory‑bound on typical scenes.
   - One‑time LUT build per call (~66 KiB) is negligible compared to per‑pixel exponentiation on megapixel inputs.
   - Padding stage now performs contiguous row copies, yielding a minor but free ~2–3× speedup for this step.
+  - dB+mask stage avoids an extra scan and reduces bounds checks on contiguous arrays; removes the secondary `valid_db` allocation and its cache traffic.
 
 - **Compatibility**:
-  - No public API changes; visual behavior matches the previous implementation.
+  - BREAKING (library API): removed the `valid_db` slice parameter from autoscale helpers listed above. Typical CLI/GUI flows are unaffected; consumers of the library API must stop passing this argument. Visual behavior remains unchanged.
 
 ### [0.2.9] - 2025-08-18 (Unpublished)
 

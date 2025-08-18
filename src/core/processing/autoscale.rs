@@ -236,7 +236,6 @@ pub fn scale_u16_to_u8(data: &[u16]) -> Vec<u8> {
 pub fn autoscale_db_image(
     db: &Array2<f64>,
     valid_mask: &[bool],
-    _valid_db: &[f64], // Kept for API compatibility
     bit_depth: BitDepth,
 ) -> Vec<u16> {
     // Fast O(N) stats and percentiles
@@ -321,7 +320,6 @@ pub fn autoscale_db_image(
 pub fn autoscale_db_image_advanced(
     db: &Array2<f64>,
     valid_mask: &[bool],
-    _valid_db: &[f64], // Kept for API compatibility
     bit_depth: BitDepth,
     strategy: AutoscaleStrategy, // robust, adaptive, equalized, tamed, default
 ) -> Vec<u16> {
@@ -487,18 +485,17 @@ pub fn autoscale_db_image_advanced(
 pub fn autoscale_db_image_to_bitdepth(
     db: &Array2<f64>,
     valid_mask: &[bool],
-    valid_db: &[f64],
     bit_depth: BitDepth,
 ) -> (Vec<u8>, Option<Vec<u16>>) {
     match bit_depth {
         BitDepth::U8 => {
-            let v: Vec<u16> = autoscale_db_image(db, valid_mask, valid_db, BitDepth::U8);
+            let v: Vec<u16> = autoscale_db_image(db, valid_mask, BitDepth::U8);
             let u8_data = scale_u16_to_u8(&v);
             debug!("autoscale_db_image_to_bitdepth: U8");
             (u8_data, None)
         }
         BitDepth::U16 => {
-            let v: Vec<u16> = autoscale_db_image(db, valid_mask, valid_db, BitDepth::U16);
+            let v: Vec<u16> = autoscale_db_image(db, valid_mask, BitDepth::U16);
             debug!("autoscale_db_image_to_bitdepth: U16");
             (vec![], Some(v))
         }
@@ -509,21 +506,20 @@ pub fn autoscale_db_image_to_bitdepth(
 pub fn autoscale_db_image_to_bitdepth_advanced(
     db: &Array2<f64>,
     valid_mask: &[bool],
-    valid_db: &[f64],
     bit_depth: BitDepth,
     strategy: AutoscaleStrategy,
 ) -> (Vec<u8>, Option<Vec<u16>>) {
     match bit_depth {
         BitDepth::U8 => {
             let v: Vec<u16> =
-                autoscale_db_image_advanced(db, valid_mask, valid_db, BitDepth::U8, strategy);
+                autoscale_db_image_advanced(db, valid_mask, BitDepth::U8, strategy);
             let u8_data = scale_u16_to_u8(&v);
             debug!("autoscale_db_image_to_bitdepth: U8");
             (u8_data, None)
         }
         BitDepth::U16 => {
             let v: Vec<u16> =
-                autoscale_db_image_advanced(db, valid_mask, valid_db, BitDepth::U16, strategy);
+                autoscale_db_image_advanced(db, valid_mask, BitDepth::U16, strategy);
             debug!("autoscale_db_image_to_bitdepth: U16");
             (vec![], Some(v))
         }
