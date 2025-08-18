@@ -53,6 +53,7 @@ pub fn process_scalar_data_pipeline(
         AutoscaleStrategy::Robust
         | AutoscaleStrategy::Adaptive
         | AutoscaleStrategy::Equalized
+        | AutoscaleStrategy::Clahe
         | AutoscaleStrategy::Tamed
         | AutoscaleStrategy::Default => autoscale_db_image_to_bitdepth_advanced(
             &db_data,

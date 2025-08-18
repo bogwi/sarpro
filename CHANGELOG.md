@@ -1,5 +1,22 @@
 ### Changelog
 
+### [0.2.11] - 2025-08-18 (Unpublished)
+
+- **Added**:
+  - New autoscale strategy: CLAHE (Contrast Limited Adaptive Histogram Equalization).
+    - Implementation in `src/core/processing/autoscale.rs`: `clahe_equalize_normalized` with tile-wise histograms (default 8×8 tiles, 256 bins), contrast clipping (`clip_limit = 2.0`), and bilinear interpolation across tiles. Respects the `valid_mask`.
+    - Strategy wiring: `AutoscaleStrategy::Clahe` in `src/types.rs`; pipeline routes through advanced autoscale; CLI exposes `--autoscale clahe`; GUI adds a “CLAHE” option and description.
+
+- **Changed**:
+  - CLAHE path normalizes dB values to 0..1 using a robust window `[p01, p99]` prior to local equalization to limit outlier influence.
+  - CLI help text now lists `clahe` among autoscale strategies.
+
+- **Performance**:
+  - CLAHE is heavier than Standard/Robust percentile stretches but remains near-linear in the number of pixels with small per-tile histograms. Memory use is modest (per-tile 256-bin CDFs). Suitable for interactive quicklooks.
+
+- **Compatibility**:
+  - BREAKING (library API): Adding a new enum variant may break exhaustive `match` statements over `AutoscaleStrategy` in downstream code. CLI/GUI remain backward compatible; defaults unchanged.
+
 ### [0.2.10] - 2025-08-18 (Unpublished)
 
 - **Changed**:

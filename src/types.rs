@@ -117,6 +117,7 @@ pub enum AutoscaleStrategy {
     Robust,
     Adaptive,
     Equalized,
+    Clahe,
     Tamed,
     Default,
 }
@@ -128,6 +129,7 @@ impl std::fmt::Display for AutoscaleStrategy {
             AutoscaleStrategy::Robust => write!(f, "Robust"),
             AutoscaleStrategy::Adaptive => write!(f, "Adaptive"),
             AutoscaleStrategy::Equalized => write!(f, "Equalized"),
+            AutoscaleStrategy::Clahe => write!(f, "Clahe"),
             AutoscaleStrategy::Tamed => write!(f, "Tamed"),
             AutoscaleStrategy::Default => write!(f, "Default"),
         }

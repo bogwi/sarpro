@@ -379,6 +379,7 @@ impl SarproGui {
             AutoscaleStrategy::Robust => "robust",
             AutoscaleStrategy::Adaptive => "adaptive",
             AutoscaleStrategy::Equalized => "equalized",
+            AutoscaleStrategy::Clahe => "clahe",
             AutoscaleStrategy::Tamed => "tamed",
             AutoscaleStrategy::Default => "default",
         };

@@ -39,7 +39,7 @@ pub struct CliArgs {
     #[arg(long, value_enum, default_value_t = Polarization::Vv)]
     pub polarization: Polarization,
 
-    /// Autoscaling strategy (standard, robust, adaptive, equalized, default)
+    /// Autoscaling strategy (standard, robust, adaptive, equalized, clahe, default)
     #[arg(long, value_enum, default_value_t = AutoscaleStrategy::Tamed)]
     pub autoscale: AutoscaleStrategy,
 

@@ -212,6 +212,138 @@ fn local_median_and_range_3x3(
     Some((median, range))
 }
 
+/// Contrast Limited Adaptive Histogram Equalization (CLAHE) on a normalized 0..1 image.
+/// - Splits the image into `tiles_x` x `tiles_y` tiles
+/// - Builds per-tile histograms with `num_bins` bins
+/// - Clips each histogram at `clip_limit` (relative multiplier of average count)
+/// - Computes CDFs and performs bilinear interpolation of the CDF value for each pixel
+fn clahe_equalize_normalized(
+    norm: &Array2<f64>,
+    valid_mask: &[bool],
+    tiles_x: usize,
+    tiles_y: usize,
+    clip_limit: f64,
+    num_bins: usize,
+) -> Array2<f64> {
+
+    let rows = norm.nrows();
+    let cols = norm.ncols();
+    if rows == 0 || cols == 0 || tiles_x == 0 || tiles_y == 0 || num_bins < 2 {
+        return norm.clone();
+    }
+
+    let tile_h = (rows + tiles_y - 1) / tiles_y;
+    let tile_w = (cols + tiles_x - 1) / tiles_x;
+
+    // Precompute per-tile CDFs
+    let mut cdfs: Vec<Vec<f64>> = Vec::with_capacity(tiles_x * tiles_y);
+    cdfs.resize_with(tiles_x * tiles_y, || vec![0.0; num_bins]);
+
+    let avg_count_per_bin = |tile_rows: usize, tile_cols: usize| -> f64 {
+        let tile_pixels = (tile_rows * tile_cols) as f64;
+        tile_pixels / (num_bins as f64)
+    };
+
+    for ty in 0..tiles_y {
+        let r0 = ty * tile_h;
+        let r1 = ((ty + 1) * tile_h).min(rows);
+        let tile_rows = r1 - r0;
+        for tx in 0..tiles_x {
+            let c0 = tx * tile_w;
+            let c1 = ((tx + 1) * tile_w).min(cols);
+            let tile_cols = c1 - c0;
+
+            let mut hist = vec![0u32; num_bins];
+
+            // Build histogram for this tile
+            for r in r0..r1 {
+                for c in c0..c1 {
+                    if valid_mask[r * cols + c] {
+                        let v = norm[(r, c)].clamp(0.0, 1.0);
+                        let mut bin = (v * (num_bins as f64 - 1.0)).round() as isize;
+                        if bin < 0 { bin = 0; }
+                        if bin as usize >= num_bins { bin = (num_bins - 1) as isize; }
+                        hist[bin as usize] += 1;
+                    }
+                }
+            }
+
+            // Clip histogram
+            let avg = avg_count_per_bin(tile_rows, tile_cols);
+            let clip_threshold = (clip_limit * avg).max(1.0);
+            let mut excess: f64 = 0.0;
+            for h in &mut hist {
+                if (*h as f64) > clip_threshold {
+                    excess += (*h as f64) - clip_threshold;
+                    *h = clip_threshold as u32;
+                }
+            }
+            // Redistribute excess uniformly
+            let add_per_bin = (excess / num_bins as f64).floor();
+            let mut remainder = (excess - add_per_bin * num_bins as f64).round() as usize;
+            for h in &mut hist {
+                *h = (*h as f64 + add_per_bin) as u32;
+            }
+            let mut b = 0;
+            while remainder > 0 {
+                hist[b] += 1;
+                b = (b + 1) % num_bins;
+                remainder -= 1;
+            }
+
+            // Compute CDF normalized to 0..1
+            let total: f64 = hist.iter().map(|&x| x as f64).sum::<f64>().max(1.0);
+            let mut cdf = vec![0.0f64; num_bins];
+            let mut acc = 0.0f64;
+            for i in 0..num_bins {
+                acc += hist[i] as f64;
+                cdf[i] = (acc / total).clamp(0.0, 1.0);
+            }
+            cdfs[ty * tiles_x + tx] = cdf;
+        }
+    }
+
+    // Helper to sample bilinearly from neighboring tile CDFs
+    let sample_cdf = |r: usize, c: usize, val: f64| -> f64 {
+        let rf = r as f64 / tile_h as f64 - 0.5;
+        let cf = c as f64 / tile_w as f64 - 0.5;
+        let ty = rf.floor().max(0.0) as isize;
+        let tx = cf.floor().max(0.0) as isize;
+        let dy = rf - ty as f64;
+        let dx = cf - tx as f64;
+
+        let ty0 = ty.clamp(0, tiles_y as isize - 1) as usize;
+        let tx0 = tx.clamp(0, tiles_x as isize - 1) as usize;
+        let ty1 = ((ty + 1).clamp(0, tiles_y as isize - 1)) as usize;
+        let tx1 = ((tx + 1).clamp(0, tiles_x as isize - 1)) as usize;
+
+        let bin_pos = (val.clamp(0.0, 1.0) * (num_bins as f64 - 1.0)).round() as usize;
+
+        let cdf00 = cdfs[ty0 * tiles_x + tx0][bin_pos];
+        let cdf01 = cdfs[ty0 * tiles_x + tx1][bin_pos];
+        let cdf10 = cdfs[ty1 * tiles_x + tx0][bin_pos];
+        let cdf11 = cdfs[ty1 * tiles_x + tx1][bin_pos];
+
+        let top = cdf00 * (1.0 - dx) + cdf01 * dx;
+        let bottom = cdf10 * (1.0 - dx) + cdf11 * dx;
+        top * (1.0 - dy) + bottom * dy
+    };
+
+    let mut out = Array2::<f64>::zeros((rows, cols));
+    for r in 0..rows {
+        for c in 0..cols {
+            if valid_mask[r * cols + c] {
+                let v = norm[(r, c)];
+                out[(r, c)] = sample_cdf(r, c, v);
+            } else {
+                out[(r, c)] = 0.0;
+            }
+        }
+    }
+
+    out
+}
+
 /// Scale U16 to U8, used for resizing U16 images to U8
 pub fn scale_u16_to_u8(data: &[u16]) -> Vec<u8> {
     if data.is_empty() {
@@ -408,8 +540,13 @@ pub fn autoscale_db_image_advanced(
             // Histogram equalization approach
             (p01, p99, 1.0, false)
         }
+        AutoscaleStrategy::Clahe => {
+            debug!("CLAHE SAR scaling");
+            // Use robust window for initial normalization prior to CLAHE
+            (p01, p99, 1.0, false)
+        }
         AutoscaleStrategy::Tamed => {
-            debug!("Equalized SAR scaling");
+            debug!("Tamed SAR scaling");
             // Use with p25 and p99 for synRGB only
             (p25, p99, 1.0, false)
         }
@@ -430,7 +567,46 @@ pub fn autoscale_db_image_advanced(
         strategy, low_clip, high_clip, gamma, use_local_enhancement
     );
 
-    // Apply scaling
+    // Special path: CLAHE
+    if matches!(strategy, AutoscaleStrategy::Clahe) {
+        debug!(
+            "Applying CLAHE with window [{:.1}, {:.1}] dB over normalized domain",
+            low_clip, high_clip
+        );
+
+        let rows = db.nrows();
+        let cols = db.ncols();
+
+        // Normalize to 0..1 using the chosen window
+        let mut norm = Array2::<f64>::zeros((rows, cols));
+        for ((i, j), &v) in db.indexed_iter() {
+            if valid_mask[i * cols + j] {
+                let clipped = v.max(low_clip).min(high_clip);
+                let n = (clipped - low_clip) / range;
+                norm[(i, j)] = n;
+            } else {
+                norm[(i, j)] = 0.0;
+            }
+        }
+
+        let equalized = clahe_equalize_normalized(&norm, valid_mask, 8, 8, 2.0, 256);
+
+        let mut result = Vec::with_capacity(rows * cols);
+        let max_val = match bit_depth {
+            BitDepth::U8 => 255.0,
+            BitDepth::U16 => 65535.0,
+        };
+        for ((i, j), &n) in equalized.indexed_iter() {
+            if valid_mask[i * cols + j] {
+                result.push((n.clamp(0.0, 1.0) * max_val) as u16);
+            } else {
+                result.push(0u16);
+            }
+        }
+        return result;
+    }
+
+    // Apply scaling for other strategies
     let mut result = Vec::with_capacity(db.len());
 
     if use_local_enhancement {

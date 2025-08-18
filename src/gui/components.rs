@@ -398,6 +398,7 @@ impl OptionsComponent {
                             ui.selectable_value(&mut app.autoscale, AutoscaleStrategy::Robust, "Robust");
                             ui.selectable_value(&mut app.autoscale, AutoscaleStrategy::Adaptive, "Adaptive");
                             ui.selectable_value(&mut app.autoscale, AutoscaleStrategy::Equalized, "Equalized");
+                            ui.selectable_value(&mut app.autoscale, AutoscaleStrategy::Clahe, "CLAHE");
                             ui.selectable_value(&mut app.autoscale, AutoscaleStrategy::Tamed, "Tamed");
                             ui.selectable_value(&mut app.autoscale, AutoscaleStrategy::Default, "Default");
                         });
@@ -419,6 +420,9 @@ impl OptionsComponent {
                 }
                 AutoscaleStrategy::Equalized => {
                     "Histogram equalization approach using 1st/99th percentiles. Provides maximum enhancement of even the darkest pixels."
+                }
+                AutoscaleStrategy::Clahe => {
+                    "Contrast Limited AHE (CLAHE): local histogram equalization with clipping to avoid speckle over-enhancement. Recommended for quicklooks when more local contrast is desired."
                 }
                 AutoscaleStrategy::Tamed => {
                     "Tamed scaling based on 25th/99th percentiles. Provides maximum contrast enhancement for visualization. Recommended for synRGB and the first to try."
