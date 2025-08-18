@@ -1,6 +1,23 @@
 ### Changelog
 
-### [0.2.9] - 2025-08-18
+### [0.2.10] - 2025-08-18
+
+- **Changed**:
+  - Implemented optimization Step 8 (Synthetic RGB `powf` hot loop → LUT) in `core/processing/synthetic_rgb.rs::create_synthetic_rgb`.
+    - Replaced per‑pixel `powf` on 0..255 inputs with precomputed lookup tables:
+      - 256‑entry LUT for Red (gamma 0.7)
+      - 256‑entry LUT for Green (gamma 0.9)
+      - 65,536‑entry LUT for Blue derived from the gamma‑mapped R/G ratio raised to 0.1, preserving the original guard for `band2 == 0` and visual scaling factor
+    - Call sites remain unchanged; function signature and outputs are identical.
+
+- **Performance**:
+  - Eliminates scalar `powf` in the tight pixel loop; the synRGB stage is now memory‑bound on typical scenes.
+  - One‑time LUT build per call (~66 KiB) is negligible compared to per‑pixel exponentiation on megapixel inputs.
+
+- **Compatibility**:
+  - No public API changes; visual behavior matches the previous implementation.
+
+### [0.2.9] - 2025-08-18 (Unpublished)
 
 - **Changed**:
   - Implemented optimization Step 7 (U16 resize path) in `core/processing/resize.rs`.
