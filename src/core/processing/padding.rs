@@ -17,29 +17,31 @@ pub fn add_padding_to_square(
         "Adding padding: cols={}, rows={}, pad_cols={}, pad_rows={}",
         cols, rows, pad_cols, pad_rows
     );
-    info!("Final dimensions: {}x{}", cols, rows + pad_rows * 2);
+    info!("Final dimensions: {}x{}", max_dim, max_dim);
 
     match bit_depth {
         BitDepth::U8 => {
             let mut padded = vec![0u8; max_dim * max_dim];
+            // Copy per row using slice copies to minimize per-pixel indexing
             for row in 0..rows {
-                for col in 0..cols {
-                    let src_idx = row * cols + col;
-                    let dst_idx = (row + pad_rows) * max_dim + (col + pad_cols);
-                    padded[dst_idx] = u8_data[src_idx];
-                }
+                let src_offset = row * cols;
+                let dst_offset = (row + pad_rows) * max_dim + pad_cols;
+                let src_slice = &u8_data[src_offset..src_offset + cols];
+                let dst_slice = &mut padded[dst_offset..dst_offset + cols];
+                dst_slice.copy_from_slice(src_slice);
             }
             Ok((padded, None))
         }
         BitDepth::U16 => {
             let u16_data = u16_data.ok_or("U16 data required for U16 bit depth")?;
             let mut padded = vec![0u16; max_dim * max_dim];
+            // Copy per row using slice copies to minimize per-pixel indexing
             for row in 0..rows {
-                for col in 0..cols {
-                    let src_idx = row * cols + col;
-                    let dst_idx = (row + pad_rows) * max_dim + (col + pad_cols);
-                    padded[dst_idx] = u16_data[src_idx];
-                }
+                let src_offset = row * cols;
+                let dst_offset = (row + pad_rows) * max_dim + pad_cols;
+                let src_slice = &u16_data[src_offset..src_offset + cols];
+                let dst_slice = &mut padded[dst_offset..dst_offset + cols];
+                dst_slice.copy_from_slice(src_slice);
             }
             Ok((vec![], Some(padded)))
         }
