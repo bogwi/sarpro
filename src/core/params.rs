@@ -28,7 +28,7 @@ impl Default for ProcessingParams {
             input_format: InputFormat::Safe,
             bit_depth: BitDepthArg::U8,
             polarization: Polarization::Vv,
-            autoscale: AutoscaleStrategy::Tamed,
+            autoscale: AutoscaleStrategy::Clahe,
             size: None,
             pad: false,
             target_crs: None,

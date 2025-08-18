@@ -256,9 +256,9 @@ impl FormatOptionsComponent {
                 },
                 Polarization::Multiband => {
                     if app.output_format == OutputFormat::JPEG {
-                        "Multiband (synthetic RGB). The output is R=VV|HH, G=VH|HV, B=VV|HH/VH|HV with gamma correction for each channel. Use Tamed autoscale strategy for maximum contrast."
+                        "Multiband (synthetic RGB). The output is R=VV|HH, G=VH|HV, B=VV|HH/VH|HV with gamma correction for each channel. Use Tamed or Clahe autoscale strategy for maximum contrast."
                     } else {
-                        "Multiband. The output is grayscale. Use with Tamed autoscale strategy to isolate the ground from the water."
+                        "Multiband. The output is grayscale. Use with Tamed or Clahe autoscale strategy to isolate the ground from the water."
                     }
                 },
                 Polarization::OP(PolarizationOperation::Sum) => {
@@ -271,10 +271,10 @@ impl FormatOptionsComponent {
                     "Ratio (band1 / band2). The output is grayscale."
                 },
                 Polarization::OP(PolarizationOperation::NDiff) => {
-                    "Normalized Diff (band1 - band2) / (band1 + band2). The output is grayscale. Try with Tamed autoscale strategy for maximum contrast."
+                    "Normalized Diff (band1 - band2) / (band1 + band2). The output is grayscale. Try with Tamed or Clahe autoscale strategy for maximum contrast."
                 },
                 Polarization::OP(PolarizationOperation::LogRatio) => {
-                    "Log Ratio (log(band1 / band2)). The output is grayscale. Try with Tamed autoscale strategy for maximum contrast."
+                    "Log Ratio (log(band1 / band2)). The output is grayscale. Try with Tamed or Clahe autoscale strategy for maximum contrast."
                 },
             };
             ui.label(

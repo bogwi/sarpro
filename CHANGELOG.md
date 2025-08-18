@@ -12,6 +12,8 @@
   - CLI help text now lists `clahe` among autoscale strategies.
   - Adaptive strategy: disabled non-physical local enhancement in dB; now uses only robust percentiles + gamma. For local contrast, use `CLAHE`. GUI description updated accordingly.
   - Tamed for synRGB: implemented band-specific percentile mapping before synRGB LUTs — co-pol lower cut near p02..p05, cross-pol near p05; avoids universal p25. GUI hint updated.
+  - Default resample algorithm: `lanczos` for all operations.
+  - Default autoscale strategy: `CLAHE`.
 
 - **Performance**:
   - CLAHE is heavier than Standard/Robust percentile stretches but remains near-linear in the number of pixels with small per-tile histograms. Memory use is modest (per-tile 256-bin CDFs). Suitable for interactive quicklooks.

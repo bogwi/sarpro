@@ -40,7 +40,7 @@ pub struct CliArgs {
     pub polarization: Polarization,
 
     /// Autoscaling strategy (standard, robust, adaptive, equalized, clahe, default)
-    #[arg(long, value_enum, default_value_t = AutoscaleStrategy::Tamed)]
+    #[arg(long, value_enum, default_value_t = AutoscaleStrategy::Clahe)]
     pub autoscale: AutoscaleStrategy,
 
     /// Image size for scaling. Options:

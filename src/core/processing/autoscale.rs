@@ -453,7 +453,7 @@ pub fn autoscale_db_image_advanced(
     db: &Array2<f64>,
     valid_mask: &[bool],
     bit_depth: BitDepth,
-    strategy: AutoscaleStrategy, // robust, adaptive, equalized, tamed, default
+    strategy: AutoscaleStrategy, // robust, adaptive, equalized, tamed, CLAHE, default
 ) -> Vec<u16> {
     let max_val = match bit_depth {
         BitDepth::U8 => 255.0,

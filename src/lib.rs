@@ -40,7 +40,7 @@ fn main() -> sarpro::Result<()> {
         input_format: InputFormat::Safe,
         bit_depth: BitDepthArg::U16,
         polarization: Polarization::Multiband,
-        autoscale: AutoscaleStrategy::Tamed,
+        autoscale: AutoscaleStrategy::Clahe,
         target_crs: Some("EPSG:32630".to_string()),
         resample_alg: Some("lanczos".to_string()),
         size: Some(2048),
@@ -68,7 +68,7 @@ fn main() -> sarpro::Result<()> {
     let img = process_safe_to_buffer(
         Path::new("/data/S1A_example.SAFE"),
         Polarization::Multiband,
-        AutoscaleStrategy::Tamed,
+        AutoscaleStrategy::Clahe,
         BitDepth::U8,
         Some(1024),
         true,
@@ -100,7 +100,7 @@ fn save_single(processed: &Array2<f32>) -> sarpro::Result<()> {
         Some(2048),
         None,                  // Optional SAFE metadata if available
         true,
-        AutoscaleStrategy::Tamed,
+        AutoscaleStrategy::Clahe,
         ProcessingOperation::SingleBand,
     )
 }
@@ -115,7 +115,7 @@ fn save_dual(vv: &Array2<f32>, vh: &Array2<f32>) -> sarpro::Result<()> {
         Some(1024),
         None,
         true,
-        AutoscaleStrategy::Tamed,
+        AutoscaleStrategy::Clahe,
         ProcessingOperation::MultibandVvVh,
     )
 }
@@ -136,7 +136,7 @@ fn main() -> sarpro::Result<()> {
         input_format: InputFormat::Safe,
         bit_depth: BitDepthArg::U8,
         polarization: Polarization::Multiband,
-        autoscale: AutoscaleStrategy::Tamed,
+        autoscale: AutoscaleStrategy::Clahe,
         target_crs: Some("EPSG:32630".to_string()),
         resample_alg: Some("lanczos".to_string()),
         size: Some(1024),
@@ -170,7 +170,7 @@ fn main() {
         input_format: InputFormat::Safe,
         bit_depth: BitDepthArg::U8,
         polarization: Polarization::Vv,
-        autoscale: AutoscaleStrategy::Tamed,
+        autoscale: AutoscaleStrategy::Clahe,
         target_crs: Some("EPSG:32630".to_string()),
         resample_alg: Some("lanczos".to_string()),
         size: None,
