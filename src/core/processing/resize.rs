@@ -59,17 +59,33 @@ pub fn resize_u16_image(
     target_cols: usize,
     target_rows: usize,
 ) -> Result<Vec<u16>, Box<dyn std::error::Error>> {
-    use crate::core::processing::autoscale::scale_u16_to_u8;
-    let u8_data = scale_u16_to_u8(data);
-    let resized_u8 = resize_u8_image(
-        &u8_data,
-        original_cols,
-        original_rows,
-        target_cols,
-        target_rows,
+    let resize_options =
+        ResizeOptions::new().resize_alg(ResizeAlg::Convolution(FilterType::Lanczos3));
+    let mut resizer = Resizer::new();
+
+    // Convert u16 slice into little-endian bytes for fast_image_resize
+    let mut src_bytes = Vec::with_capacity(data.len() * 2);
+    for &v in data {
+        let b = v.to_le_bytes();
+        src_bytes.push(b[0]);
+        src_bytes.push(b[1]);
+    }
+
+    let src_image = Image::from_vec_u8(
+        original_cols as u32,
+        original_rows as u32,
+        src_bytes,
+        PixelType::U16,
     )?;
-    let resized_u16: Vec<u16> = resized_u8.into_iter().map(|x| (x as u16) << 8).collect();
-    Ok(resized_u16)
+    let mut dst_image = Image::new(target_cols as u32, target_rows as u32, PixelType::U16);
+    resizer.resize(&src_image, &mut dst_image, &resize_options)?;
+
+    let dst_bytes = dst_image.into_vec();
+    let mut out = Vec::with_capacity((dst_bytes.len() + 1) / 2);
+    for chunk in dst_bytes.chunks_exact(2) {
+        out.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+    }
+    Ok(out)
 }
 
 pub fn resize_image_data_with_meta(
@@ -142,7 +158,7 @@ pub fn resize_image_data_with_meta(
                 (resized_u8, None)
             }
             BitDepth::U16 => {
-                info!("Resizing U16 image to U8: currently all scaling is done to 8 bit");
+                info!("Resizing U16 image without down-conversion");
                 let u16_data = u16_data.ok_or("U16 data required for U16 bit depth")?;
                 let resized_u16 =
                     resize_u16_image(u16_data, original_cols, original_rows, new_cols, new_rows)?;

@@ -1,17 +1,40 @@
 ### Changelog
 
-### [0.2.8] - 2025-08-18
+### [0.2.9] - 2025-08-18
 
-- Changed:
+- **Changed**:
+  - Implemented optimization Step 7 (U16 resize path) in `core/processing/resize.rs`.
+  - `resize_u16_image` now resizes true 16‑bit data directly using `fast_image_resize` with `PixelType::U16`.
+    The crate stores image data in a `Vec<u8>`; we pack the `u16` slice into little‑endian bytes before resize
+    and reconstruct `u16` after. This is a real 16‑bit pipeline, not an emulation.
+  - Updated log message to reflect that U16 is resized without down‑conversion.
+
+- Why this works:
+  - `fast_image_resize` interprets the raw `u8` buffer according to `PixelType`. With `PixelType::U16`, every
+    two bytes form one sample. On our little‑endian targets (x86_64/ARM64), `to_le_bytes`/`from_le_bytes` preserves
+    numeric values. On a big‑endian target, `to_be_bytes`/`from_be_bytes` would be used instead.
+
+- **Performance**:
+  - Removes the previous U16→U8→U16 round‑trip (and its extra passes/allocations), reduces memory traffic, avoids
+    quantization losses, and lets the resizer operate on 16‑bit samples (better SIMD/cache behavior). Net effect:
+    faster U16 resize with equal or better quality.
+
+- **Compatibility**:
+  - No public API changes. Behavior is equivalent, with improved precision on the U16 path because down‑/up‑conversion
+    is avoided.
+
+### [0.2.8] - 2025-08-18 (Unpublished)
+
+- **Changed**:
   - Implemented optimization Step 6 (stop cloning large arrays on getters).
   - `SafeReader::{vv_data,vh_data,hh_data,hv_data}` now return borrowed `&Array2<f32>` instead of owned `Array2<f32>`.
   - `SafeReader::data()` now returns `&Array2<f32>`.
   - Updated API/GUI/CLI call sites to use borrowed references and avoid redundant clones; clone only where an owned buffer is explicitly required (e.g., `api::load_polarization` still returns an owned array and performs a single clone at the boundary).
 
-- Performance:
+- **Performance**:
   - Eliminates extra multi‑hundred‑MB clones during processing; reduces peak memory and transient allocator pressure.
 
-- Compatibility:
+- **Compatibility**:
   - BREAKING (library API): code calling `SafeReader` getters must adapt from owned returns to borrowed references. Downstream functions like `save_processed_image` and processing ops already accept borrows, so most changes are mechanical.
 
 ### [0.2.7] - 2025-08-18 (unpublished)
