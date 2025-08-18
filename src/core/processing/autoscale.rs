@@ -702,3 +702,41 @@ pub fn autoscale_db_image_to_bitdepth_advanced(
         }
     }
 }
+
+/// Band-specific Tamed autoscale for synRGB quicklooks.
+/// Co-pol (VV/HH): use a lower cut near p02..p05 to preserve dark water/shadows.
+/// Cross-pol (VH/HV): use a slightly higher lower cut to lift signal.
+/// Always map to U8 as synRGB expects U8 inputs and applies channel gammas itself.
+pub fn autoscale_db_image_tamed_synrgb_u8(
+    db: &Array2<f64>,
+    valid_mask: &[bool],
+    is_copol: bool,
+) -> Vec<u8> {
+    let stats = compute_histogram_stats(db, valid_mask);
+    if stats.valid_count == 0 {
+        return vec![0u8; db.len()];
+    }
+
+    // Choose band-specific low clip; high clip at p99 to avoid saturating bright targets
+    let (low_clip, high_clip) = if is_copol {
+        // Co-pol (VV/HH): darker background; cut lower (more conservative)
+        (stats.p02.min(stats.p05), stats.p99)
+    } else {
+        // Cross-pol (VH/HV): generally weaker; raise floor slightly
+        (stats.p05, stats.p99)
+    };
+
+    let range = (high_clip - low_clip).max(1.0);
+
+    db.indexed_iter()
+        .map(|(idx, &v)| {
+            if valid_mask[idx.0 * db.ncols() + idx.1] {
+                let clipped = v.max(low_clip).min(high_clip);
+                let normalized = (clipped - low_clip) / range;
+                (normalized * 255.0).clamp(0.0, 255.0) as u8
+            } else {
+                0u8
+            }
+        })
+        .collect()
+}

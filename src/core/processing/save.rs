@@ -3,6 +3,7 @@ use std::path::Path;
 use tracing::info;
 
 use crate::core::processing::pipeline::process_scalar_data_pipeline;
+use crate::core::processing::autoscale::autoscale_db_image_tamed_synrgb_u8;
 use crate::core::processing::resize::resize_image_data_with_meta;
 use crate::core::processing::synthetic_rgb::create_synthetic_rgb;
 use crate::io::writers::jpeg::{write_gray_jpeg, write_rgb_jpeg};
@@ -315,14 +316,21 @@ pub fn save_processed_multiband_image_sequential(
         OutputFormat::JPEG => {
             info!("Creating syntetic RGB JPEG from VV | HH (Red) and VH | HV (Green) bands");
 
-            let (db_data, _, scaled_u8, _) =
+            let (db_data, valid_mask, scaled_u8, _) =
                 process_scalar_data_pipeline(processed1, BitDepth::U8, strategy);
+
+            // If Tamed for synRGB, recompute band1 U8 using band-specific tamed autoscale
+            let input_u8_band1: Vec<u8> = if matches!(strategy, AutoscaleStrategy::Tamed) {
+                autoscale_db_image_tamed_synrgb_u8(&db_data, &valid_mask, true)
+            } else {
+                scaled_u8
+            };
             let shape = db_data.dim();
             let (rows, cols) = shape;
 
             let (final_cols, final_rows, final_u8_band1, _, scale_x, scale_y, pad_left, pad_top) =
                 resize_image_data_with_meta(
-                    &scaled_u8,
+                    &input_u8_band1,
                     None,
                     cols,
                     rows,
@@ -331,11 +339,18 @@ pub fn save_processed_multiband_image_sequential(
                     pad,
                 )?;
 
-            let (_, _, scaled_u8, _) =
+            let (db2, valid2, scaled_u8_b2, _) =
                 process_scalar_data_pipeline(processed2, BitDepth::U8, strategy);
 
+            // If Tamed for synRGB, recompute band2 U8 using band-specific tamed autoscale
+            let input_u8_band2: Vec<u8> = if matches!(strategy, AutoscaleStrategy::Tamed) {
+                autoscale_db_image_tamed_synrgb_u8(&db2, &valid2, false)
+            } else {
+                scaled_u8_b2
+            };
+
             let (_, _, final_u8_band2, _, _sx2, _sy2, _pl2, _pt2) = resize_image_data_with_meta(
-                &scaled_u8,
+                &input_u8_band2,
                 None,
                 cols,
                 rows,

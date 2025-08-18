@@ -425,7 +425,7 @@ impl OptionsComponent {
                     "Contrast Limited AHE (CLAHE) on post-stretch grayscale with clipping (speckle-aware). Recommended for quicklooks when local contrast is desired."
                 }
                 AutoscaleStrategy::Tamed => {
-                    "Tamed scaling based on 25th/99th percentiles. Provides maximum contrast enhancement for visualization. Recommended for synRGB and the first to try."
+                    "Tamed: Grayscale uses 25th/99th percentiles. For synRGB, applies band-specific cuts (co-pol≈p02, cross-pol≈p05) with channel gammas for stronger separation."
                 }
                 AutoscaleStrategy::Default => {
                     "Default advanced scaling (same as Adaptive). Automatically analyzes image characteristics and applies optimal scaling parameters. Recommended."
