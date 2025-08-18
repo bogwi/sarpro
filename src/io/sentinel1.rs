@@ -1421,51 +1421,51 @@ impl SafeReader {
         &self.metadata
     }
 
-    /// Retrieve the image data as a full Array2 (returns VV data if available, otherwise VH)
-    pub fn data(&self) -> Result<Array2<f32>, SafeError> {
+    /// Retrieve the image data as a borrowed array (returns VV data if available, otherwise VH)
+    pub fn data(&self) -> Result<&Array2<f32>, SafeError> {
         if let Some(ref arr) = self.vv_data {
-            Ok(arr.clone())
+            Ok(arr)
         } else if let Some(ref arr) = self.vh_data {
-            Ok(arr.clone())
+            Ok(arr)
         } else {
             Err(SafeError::MissingField("no polarization data available"))
         }
     }
 
-    /// Get VV data
-    pub fn vv_data(&self) -> Result<Array2<f32>, SafeError> {
+    /// Get VV data (borrowed reference)
+    pub fn vv_data(&self) -> Result<&Array2<f32>, SafeError> {
         let arr = self
             .vv_data
             .as_ref()
             .ok_or(SafeError::MissingField("vv_data"))?;
-        Ok(arr.clone())
+        Ok(arr)
     }
 
-    /// Get VH data
-    pub fn vh_data(&self) -> Result<Array2<f32>, SafeError> {
+    /// Get VH data (borrowed reference)
+    pub fn vh_data(&self) -> Result<&Array2<f32>, SafeError> {
         let arr = self
             .vh_data
             .as_ref()
             .ok_or(SafeError::MissingField("vh_data"))?;
-        Ok(arr.clone())
+        Ok(arr)
     }
 
-    /// Get HH data
-    pub fn hh_data(&self) -> Result<Array2<f32>, SafeError> {
+    /// Get HH data (borrowed reference)
+    pub fn hh_data(&self) -> Result<&Array2<f32>, SafeError> {
         let arr = self
             .hh_data
             .as_ref()
             .ok_or(SafeError::MissingField("hh_data"))?;
-        Ok(arr.clone())
+        Ok(arr)
     }
 
-    /// Get HV data
-    pub fn hv_data(&self) -> Result<Array2<f32>, SafeError> {
+    /// Get HV data (borrowed reference)
+    pub fn hv_data(&self) -> Result<&Array2<f32>, SafeError> {
         let arr = self
             .hv_data
             .as_ref()
             .ok_or(SafeError::MissingField("hv_data"))?;
-        Ok(arr.clone())
+        Ok(arr)
     }
 
     /// Get sum of VV and VH data (vv + vh)
@@ -1473,7 +1473,7 @@ impl SafeReader {
         info!("Summing VV and VH data");
         let vv = self.vv_data()?;
         let vh = self.vh_data()?;
-        Ok(crate::core::processing::ops::sum_arrays(&vv, &vh))
+        Ok(crate::core::processing::ops::sum_arrays(vv, vh))
     }
 
     /// Get difference of VV and VH data (vv - vh)
@@ -1481,7 +1481,7 @@ impl SafeReader {
         info!("Differencing VV and VH data");
         let vv = self.vv_data()?;
         let vh = self.vh_data()?;
-        Ok(crate::core::processing::ops::difference_arrays(&vv, &vh))
+        Ok(crate::core::processing::ops::difference_arrays(vv, vh))
     }
 
     /// Get ratio of VV and VH data (vv / vh, with zero handling)
@@ -1489,7 +1489,7 @@ impl SafeReader {
         info!("Calculating ratio of VV and VH data");
         let vv = self.vv_data()?;
         let vh = self.vh_data()?;
-        Ok(crate::core::processing::ops::ratio_arrays(&vv, &vh))
+        Ok(crate::core::processing::ops::ratio_arrays(vv, vh))
     }
 
     /// Get normalized difference of VV and VH data ((vv - vh) / (vv + vh))
@@ -1498,7 +1498,7 @@ impl SafeReader {
         let vv = self.vv_data()?;
         let vh = self.vh_data()?;
         Ok(crate::core::processing::ops::normalized_diff_arrays(
-            &vv, &vh,
+            vv, vh,
         ))
     }
 
@@ -1507,7 +1507,7 @@ impl SafeReader {
         info!("Calculating log ratio of VV and VH data");
         let vv = self.vv_data()?;
         let vh = self.vh_data()?;
-        Ok(crate::core::processing::ops::log_ratio_arrays(&vv, &vh))
+        Ok(crate::core::processing::ops::log_ratio_arrays(vv, vh))
     }
 
     // HH/HV pair operations
@@ -1516,7 +1516,7 @@ impl SafeReader {
         info!("Summing HH and HV data");
         let hh = self.hh_data()?;
         let hv = self.hv_data()?;
-        Ok(crate::core::processing::ops::sum_arrays(&hh, &hv))
+        Ok(crate::core::processing::ops::sum_arrays(hh, hv))
     }
 
     /// Get difference of HH and HV data (hh - hv)
@@ -1524,7 +1524,7 @@ impl SafeReader {
         info!("Differencing HH and HV data");
         let hh = self.hh_data()?;
         let hv = self.hv_data()?;
-        Ok(crate::core::processing::ops::difference_arrays(&hh, &hv))
+        Ok(crate::core::processing::ops::difference_arrays(hh, hv))
     }
 
     /// Get ratio of HH and HV data (hh / hv, with zero handling)
@@ -1532,7 +1532,7 @@ impl SafeReader {
         info!("Calculating ratio of HH and HV data");
         let hh = self.hh_data()?;
         let hv = self.hv_data()?;
-        Ok(crate::core::processing::ops::ratio_arrays(&hh, &hv))
+        Ok(crate::core::processing::ops::ratio_arrays(hh, hv))
     }
 
     /// Get normalized difference of HH and HV data ((hh - hv) / (hh + hv))
@@ -1541,7 +1541,7 @@ impl SafeReader {
         let hh = self.hh_data()?;
         let hv = self.hv_data()?;
         Ok(crate::core::processing::ops::normalized_diff_arrays(
-            &hh, &hv,
+            hh, hv,
         ))
     }
 
@@ -1550,7 +1550,7 @@ impl SafeReader {
         info!("Calculating log ratio of HH and HV data");
         let hh = self.hh_data()?;
         let hv = self.hv_data()?;
-        Ok(crate::core::processing::ops::log_ratio_arrays(&hh, &hv))
+        Ok(crate::core::processing::ops::log_ratio_arrays(hh, hv))
     }
 
     /// Get a string representation of available polarizations for error reporting

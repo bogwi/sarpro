@@ -94,7 +94,7 @@ pub fn process_safe_to_buffer(
             };
 
             let (db_data, _mask, scaled_u8, scaled_u16) =
-                process_scalar_data_pipeline(&processed, bit_depth, autoscale);
+                process_scalar_data_pipeline(processed, bit_depth, autoscale);
             let (rows, cols) = db_data.dim();
             let (final_cols, final_rows, final_u8, final_u16) = resize_image_data(
                 &scaled_u8,
@@ -143,7 +143,7 @@ pub fn process_safe_to_buffer(
             };
 
             let (db1, _m1, s1_u8, s1_u16) =
-                process_scalar_data_pipeline(&band1, bit_depth, autoscale);
+                process_scalar_data_pipeline(band1, bit_depth, autoscale);
             let (rows, cols) = db1.dim();
             let (final_cols, final_rows, final1_u8, final1_u16) = resize_image_data(
                 &s1_u8,
@@ -157,7 +157,7 @@ pub fn process_safe_to_buffer(
             .map_err(|e| Error::external(e))?;
 
             let (_db2, _m2, s2_u8, s2_u16) =
-                process_scalar_data_pipeline(&band2, bit_depth, autoscale);
+                process_scalar_data_pipeline(band2, bit_depth, autoscale);
             let (_c2, _r2, final2_u8, final2_u16) = resize_image_data(
                 &s2_u8,
                 s2_u16.as_deref(),
@@ -213,14 +213,14 @@ pub fn process_safe_to_buffer(
             };
 
             let (db1, _m1, s1_u8, _s1_u16) =
-                process_scalar_data_pipeline(&band1, BitDepth::U8, autoscale);
+                process_scalar_data_pipeline(band1, BitDepth::U8, autoscale);
             let (rows, cols) = db1.dim();
             let (final_cols, final_rows, final1_u8, _) =
                 resize_image_data(&s1_u8, None, cols, rows, target_size, BitDepth::U8, pad)
                     .map_err(|e| Error::external(e))?;
 
             let (_db2, _m2, s2_u8, _s2_u16) =
-                process_scalar_data_pipeline(&band2, BitDepth::U8, autoscale);
+                process_scalar_data_pipeline(band2, BitDepth::U8, autoscale);
             let (_c2, _r2, final2_u8, _) =
                 resize_image_data(&s2_u8, None, cols, rows, target_size, BitDepth::U8, pad)
                     .map_err(|e| Error::external(e))?;
@@ -255,7 +255,7 @@ pub fn process_safe_to_buffer(
             };
 
             let (db_data, _m, s_u8, _s_u16) =
-                process_scalar_data_pipeline(&processed, BitDepth::U8, autoscale);
+                process_scalar_data_pipeline(processed, BitDepth::U8, autoscale);
             let (rows, cols) = db_data.dim();
             let (final_cols, final_rows, final_u8, _) =
                 resize_image_data(&s_u8, None, cols, rows, target_size, BitDepth::U8, pad)
@@ -461,7 +461,7 @@ pub fn process_safe_to_path(input: &Path, output: &Path, params: &ProcessingPara
             };
 
             save_processed_image(
-                &processed,
+                processed,
                 output,
                 params.format,
                 bit_depth,
@@ -479,8 +479,8 @@ pub fn process_safe_to_path(input: &Path, output: &Path, params: &ProcessingPara
                 let vv = reader.vv_data()?;
                 let vh = reader.vh_data()?;
                 save_processed_multiband_image_sequential(
-                    &vv,
-                    &vh,
+                    vv,
+                    vh,
                     output,
                     params.format,
                     bit_depth,
@@ -495,8 +495,8 @@ pub fn process_safe_to_path(input: &Path, output: &Path, params: &ProcessingPara
                 let hh = reader.hh_data()?;
                 let hv = reader.hv_data()?;
                 save_processed_multiband_image_sequential(
-                    &hh,
-                    &hv,
+                    hh,
+                    hv,
                     output,
                     params.format,
                     bit_depth,
@@ -587,7 +587,7 @@ pub fn process_safe_with_options(
             };
 
             save_processed_image(
-                &processed,
+                processed,
                 output,
                 format,
                 bit_depth,
@@ -604,8 +604,8 @@ pub fn process_safe_with_options(
                 let vv = reader.vv_data()?;
                 let vh = reader.vh_data()?;
                 save_processed_multiband_image_sequential(
-                    &vv,
-                    &vh,
+                    vv,
+                    vh,
                     output,
                     format,
                     bit_depth,
@@ -620,8 +620,8 @@ pub fn process_safe_with_options(
                 let hh = reader.hh_data()?;
                 let hv = reader.hv_data()?;
                 save_processed_multiband_image_sequential(
-                    &hh,
-                    &hv,
+                    hh,
+                    hv,
                     output,
                     format,
                     bit_depth,
@@ -751,14 +751,14 @@ pub fn load_polarization(
     }
 
     let reader = SafeReader::open_with_options(input, pol_to_reader_hint(&pol), None, None, None)?;
-    let data = match pol {
+    let data_ref: &Array2<f32> = match pol {
         Polarization::Vv => reader.vv_data()?,
         Polarization::Vh => reader.vh_data()?,
         Polarization::Hh => reader.hh_data()?,
         Polarization::Hv => reader.hv_data()?,
         _ => unreachable!(),
     };
-    Ok((data, reader.metadata.clone()))
+    Ok((data_ref.clone(), reader.metadata.clone()))
 }
 
 /// Compute an operation (sum/diff/ratio/...) over an available pair and return array + metadata

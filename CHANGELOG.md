@@ -1,6 +1,20 @@
 ### Changelog
 
-### [0.2.7] - 2025-08-18
+### [0.2.8] - 2025-08-18
+
+- Changed:
+  - Implemented optimization Step 6 (stop cloning large arrays on getters).
+  - `SafeReader::{vv_data,vh_data,hh_data,hv_data}` now return borrowed `&Array2<f32>` instead of owned `Array2<f32>`.
+  - `SafeReader::data()` now returns `&Array2<f32>`.
+  - Updated API/GUI/CLI call sites to use borrowed references and avoid redundant clones; clone only where an owned buffer is explicitly required (e.g., `api::load_polarization` still returns an owned array and performs a single clone at the boundary).
+
+- Performance:
+  - Eliminates extra multi‑hundred‑MB clones during processing; reduces peak memory and transient allocator pressure.
+
+- Compatibility:
+  - BREAKING (library API): code calling `SafeReader` getters must adapt from owned returns to borrowed references. Downstream functions like `save_processed_image` and processing ops already accept borrows, so most changes are mechanical.
+
+### [0.2.7] - 2025-08-18 (unpublished)
 
 - **Changed**:
   - Adaptive local contrast enhancement in `core/processing/autoscale.rs::autoscale_db_image_advanced` is now allocation‑free for the 3×3 window.

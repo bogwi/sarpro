@@ -277,7 +277,7 @@ impl SarproGui {
 
                 trace!("Saving processed image to: {:?}", output);
                 crate::core::processing::save::save_processed_image(
-                    &processed,
+                    processed,
                     output.as_path(),
                     format,
                     bit_depth,
