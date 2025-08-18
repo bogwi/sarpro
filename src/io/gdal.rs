@@ -103,12 +103,12 @@ impl GdalSarReader {
         })
     }
 
-    /// Read a single band (1-based index) as an f64 ndarray of shape (height, width)
+    /// Read a single band (1-based index) as an f32 ndarray of shape (height, width)
     pub fn read_band(
         &self,
         index: usize,
         e_resample_alg: Option<ResampleAlg>,
-    ) -> Result<Array2<f64>, GdalError> {
+    ) -> Result<Array2<f32>, GdalError> {
         if index == 0 || index > self.metadata.bands {
             return Err(GdalError::UnsupportedFormat(format!(
                 "Band index {} out of range",
@@ -120,7 +120,7 @@ impl GdalSarReader {
         // Define full window based on metadata
         let window = (self.metadata.size_x, self.metadata.size_y);
         // Read data into GDAL Buffer
-        let buf = band.read_as::<f64>(
+        let buf = band.read_as::<f32>(
             (0, 0),         // offset
             window,         // window size
             window,         // shape
@@ -148,7 +148,7 @@ impl GdalSarReader {
         out_cols: usize,
         out_rows: usize,
         e_resample_alg: Option<ResampleAlg>,
-    ) -> Result<Array2<f64>, GdalError> {
+    ) -> Result<Array2<f32>, GdalError> {
         if index == 0 || index > self.metadata.bands {
             return Err(GdalError::UnsupportedFormat(format!(
                 "Band index {} out of range",
@@ -158,7 +158,7 @@ impl GdalSarReader {
         let band = self.dataset.rasterband(index)?;
         let window = (self.metadata.size_x, self.metadata.size_y);
         let shape = (out_cols, out_rows);
-        let buf = band.read_as::<f64>(
+        let buf = band.read_as::<f32>(
             (0, 0),
             window,         // full window
             shape,          // desired output shape
@@ -177,7 +177,7 @@ impl GdalSarReader {
     }
 
     /// Read all bands into a vector of f64 ndarrays
-    pub fn _read_all_bands(&self) -> Result<Vec<Array2<f64>>, GdalError> {
+    pub fn _read_all_bands(&self) -> Result<Vec<Array2<f32>>, GdalError> {
         let mut result = Vec::with_capacity(self.metadata.bands);
         for idx in 1..=self.metadata.bands {
             result.push(self.read_band(idx, Some(ResampleAlg::NearestNeighbour))?);

@@ -6,12 +6,20 @@
   - Adaptive local contrast enhancement in `core/processing/autoscale.rs::autoscale_db_image_advanced` is now allocation‑free for the 3×3 window.
     - Replaced per‑pixel `Vec` allocation and full sort with a fixed `[f64; 9]` buffer and in‑place insertion sort.
     - Added helpers: `local_median_and_range_3x3` and `insertion_sort_in_place` to compute local median/range without heap allocations.
+  - Excess precision and type choices (Step 5): switched GRD processing from `Complex<f64>` to scalar `f32` intensities across the pipeline.
+    - Readers now return `Array2<f32>`; GDAL reads in `f32`.
+    - Processing ops (`sum/diff/ratio/n-diff/log-ratio`) operate on scalar intensities.
+    - Pipeline renamed to `process_scalar_data_*`; save paths and API functions updated to accept `Array2<f32>`.
+    - CLI/GUI unchanged for users; internal memory tracing updated.
 
 - **Performance**:
   - Adaptive autoscale with local enhancement runs about ~2× faster on typical scenes and removes allocator pressure (constant small stack buffer), improving overall responsiveness.
+  - End‑to‑end improvements on original/full‑resolution processing: ~2× lower memory footprint (drop `Complex`), additional ~2× from `f64`→`f32` where bandwidth‑bound; noticeable wall‑clock gains in I/O‑light runs.
 
 - **Compatibility**:
-  - No public API changes. Visual behavior equivalent with improved local contrast stability.
+  - BREAKING (library API): public functions that previously accepted/returned `Array2<Complex<f64>>` now use `Array2<f32>` for GRD intensity processing (e.g., `save_image`, `save_multiband_image`, `process_safe_to_buffer`, `load_polarization`, `load_operation`). This crate is pre‑1.0 and documented as experimental/evolving.
+  - Visual/quantitative behavior: unchanged for GRD use‑cases; `f32` precision is standard for SAR intensities and differences are far below speckle/noise and autoscale bin widths.
+  - Roadmap alignment: GRD phases (masking, speckle filters, RTC normalization, tiling, time‑series intensity change) are intensity‑based and unaffected. Future SLC/phase workflows can add parallel complex paths without impacting the GRD pipeline.
 
 ### [0.2.6] - 2025-08-16
 

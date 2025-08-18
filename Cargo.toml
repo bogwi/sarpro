@@ -24,7 +24,6 @@ full = ["gui"]
 [dependencies]
 # Core dependencies (always included)
 ndarray = { version = "0.15", features = ["rayon"] }
-num-complex = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"

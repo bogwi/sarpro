@@ -4,10 +4,9 @@
 use std::path::Path;
 
 use ndarray::Array2;
-use num_complex::Complex;
 
 use crate::core::params::ProcessingParams;
-use crate::core::processing::pipeline::process_complex_data_pipeline;
+use crate::core::processing::pipeline::process_scalar_data_pipeline;
 use crate::core::processing::resize::resize_image_data;
 use crate::core::processing::save::{
     save_processed_image, save_processed_multiband_image_sequential,
@@ -95,7 +94,7 @@ pub fn process_safe_to_buffer(
             };
 
             let (db_data, _mask, scaled_u8, scaled_u16) =
-                process_complex_data_pipeline(&processed, bit_depth, autoscale);
+                process_scalar_data_pipeline(&processed, bit_depth, autoscale);
             let (rows, cols) = db_data.dim();
             let (final_cols, final_rows, final_u8, final_u16) = resize_image_data(
                 &scaled_u8,
@@ -144,7 +143,7 @@ pub fn process_safe_to_buffer(
             };
 
             let (db1, _m1, s1_u8, s1_u16) =
-                process_complex_data_pipeline(&band1, bit_depth, autoscale);
+                process_scalar_data_pipeline(&band1, bit_depth, autoscale);
             let (rows, cols) = db1.dim();
             let (final_cols, final_rows, final1_u8, final1_u16) = resize_image_data(
                 &s1_u8,
@@ -158,7 +157,7 @@ pub fn process_safe_to_buffer(
             .map_err(|e| Error::external(e))?;
 
             let (_db2, _m2, s2_u8, s2_u16) =
-                process_complex_data_pipeline(&band2, bit_depth, autoscale);
+                process_scalar_data_pipeline(&band2, bit_depth, autoscale);
             let (_c2, _r2, final2_u8, final2_u16) = resize_image_data(
                 &s2_u8,
                 s2_u16.as_deref(),
@@ -214,14 +213,14 @@ pub fn process_safe_to_buffer(
             };
 
             let (db1, _m1, s1_u8, _s1_u16) =
-                process_complex_data_pipeline(&band1, BitDepth::U8, autoscale);
+                process_scalar_data_pipeline(&band1, BitDepth::U8, autoscale);
             let (rows, cols) = db1.dim();
             let (final_cols, final_rows, final1_u8, _) =
                 resize_image_data(&s1_u8, None, cols, rows, target_size, BitDepth::U8, pad)
                     .map_err(|e| Error::external(e))?;
 
             let (_db2, _m2, s2_u8, _s2_u16) =
-                process_complex_data_pipeline(&band2, BitDepth::U8, autoscale);
+                process_scalar_data_pipeline(&band2, BitDepth::U8, autoscale);
             let (_c2, _r2, final2_u8, _) =
                 resize_image_data(&s2_u8, None, cols, rows, target_size, BitDepth::U8, pad)
                     .map_err(|e| Error::external(e))?;
@@ -256,7 +255,7 @@ pub fn process_safe_to_buffer(
             };
 
             let (db_data, _m, s_u8, _s_u16) =
-                process_complex_data_pipeline(&processed, BitDepth::U8, autoscale);
+                process_scalar_data_pipeline(&processed, BitDepth::U8, autoscale);
             let (rows, cols) = db_data.dim();
             let (final_cols, final_rows, final_u8, _) =
                 resize_image_data(&s_u8, None, cols, rows, target_size, BitDepth::U8, pad)
@@ -279,7 +278,7 @@ pub fn process_safe_to_buffer(
         // Polarization operation -> single band path
         (format, Polarization::OP(op)) => {
             // Resolve to a single processed band first, then reuse single-band paths above
-            let combined: Array2<Complex<f64>> =
+            let combined: Array2<f32> =
                 if reader.vv_data().is_ok() && reader.vh_data().is_ok() {
                     match op {
                         PolarizationOperation::Sum => reader.sum_data()?,
@@ -307,7 +306,7 @@ pub fn process_safe_to_buffer(
             match format {
                 OutputFormat::TIFF => {
                     let (db_data, _m, s_u8, s_u16) =
-                        process_complex_data_pipeline(&combined, bit_depth, autoscale);
+                        process_scalar_data_pipeline(&combined, bit_depth, autoscale);
                     let (rows, cols) = db_data.dim();
                     let (final_cols, final_rows, final_u8, final_u16) = resize_image_data(
                         &s_u8,
@@ -343,7 +342,7 @@ pub fn process_safe_to_buffer(
                 }
                 OutputFormat::JPEG => {
                     let (db_data, _m, s_u8, _s_u16) =
-                        process_complex_data_pipeline(&combined, BitDepth::U8, autoscale);
+                        process_scalar_data_pipeline(&combined, BitDepth::U8, autoscale);
                     let (rows, cols) = db_data.dim();
                     let (final_cols, final_rows, final_u8, _) =
                         resize_image_data(&s_u8, None, cols, rows, target_size, BitDepth::U8, pad)
@@ -517,7 +516,7 @@ pub fn process_safe_to_path(input: &Path, output: &Path, params: &ProcessingPara
         }
         Polarization::OP(op) => {
             // Choose pair (VV/VH preferred)
-            let processed: Array2<Complex<f64>> =
+            let processed: Array2<f32> =
                 if reader.vv_data().is_ok() && reader.vh_data().is_ok() {
                     match op {
                         PolarizationOperation::Sum => reader.sum_data()?,
@@ -641,7 +640,7 @@ pub fn process_safe_with_options(
             }
         }
         Polarization::OP(op) => {
-            let processed: Array2<Complex<f64>> =
+            let processed: Array2<f32> =
                 if reader.vv_data().is_ok() && reader.vh_data().is_ok() {
                     match op {
                         PolarizationOperation::Sum => reader.sum_data()?,
@@ -684,7 +683,7 @@ pub fn process_safe_with_options(
 
 /// Typed save helper for single-band arrays
 pub fn save_image(
-    processed: &Array2<Complex<f64>>,
+    processed: &Array2<f32>,
     output: &Path,
     format: OutputFormat,
     bit_depth: BitDepth,
@@ -710,8 +709,8 @@ pub fn save_image(
 
 /// Typed save helper for multiband arrays (VV/VH or HH/HV)
 pub fn save_multiband_image(
-    processed1: &Array2<Complex<f64>>,
-    processed2: &Array2<Complex<f64>>,
+    processed1: &Array2<f32>,
+    processed2: &Array2<f32>,
     output: &Path,
     format: OutputFormat,
     bit_depth: BitDepth,
@@ -741,7 +740,7 @@ pub fn save_multiband_image(
 pub fn load_polarization(
     input: &Path,
     pol: Polarization,
-) -> Result<(Array2<Complex<f64>>, SafeMetadata)> {
+) -> Result<(Array2<f32>, SafeMetadata)> {
     match pol {
         Polarization::Multiband | Polarization::OP(_) => {
             return Err(Error::Processing(
@@ -766,7 +765,7 @@ pub fn load_polarization(
 pub fn load_operation(
     input: &Path,
     op: PolarizationOperation,
-) -> Result<(Array2<Complex<f64>>, SafeMetadata)> {
+) -> Result<(Array2<f32>, SafeMetadata)> {
     let reader = SafeReader::open_with_options(input, Some("all_pairs"), None, None, None)?;
 
     // Prefer VV/VH if both available, otherwise HH/HV

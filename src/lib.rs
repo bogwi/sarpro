@@ -86,13 +86,12 @@ Typed save helpers (when you already have arrays)
 ```rust
 use std::path::Path;
 use ndarray::Array2;
-use num_complex::Complex;
 use sarpro::{
     save_image, save_multiband_image,
     AutoscaleStrategy, BitDepth, OutputFormat, ProcessingOperation,
 };
 
-fn save_single(processed: &Array2<Complex<f64>>) -> sarpro::Result<()> {
+fn save_single(processed: &Array2<f32>) -> sarpro::Result<()> {
     save_image(
         processed,
         Path::new("/out/single.tiff"),
@@ -106,7 +105,7 @@ fn save_single(processed: &Array2<Complex<f64>>) -> sarpro::Result<()> {
     )
 }
 
-fn save_dual(vv: &Array2<Complex<f64>>, vh: &Array2<Complex<f64>>) -> sarpro::Result<()> {
+fn save_dual(vv: &Array2<f32>, vh: &Array2<f32>) -> sarpro::Result<()> {
     save_multiband_image(
         vv,
         vh,

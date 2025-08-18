@@ -1,9 +1,8 @@
 use ndarray::Array2;
-use num_complex::Complex;
 use std::path::Path;
 use tracing::info;
 
-use crate::core::processing::pipeline::process_complex_data_pipeline;
+use crate::core::processing::pipeline::process_scalar_data_pipeline;
 use crate::core::processing::resize::resize_image_data_with_meta;
 use crate::core::processing::synthetic_rgb::create_synthetic_rgb;
 use crate::io::writers::jpeg::{write_gray_jpeg, write_rgb_jpeg};
@@ -21,7 +20,7 @@ use crate::types::{
 // resize_image_data moved to crate::core::processing::resize
 
 pub fn save_processed_image(
-    processed: &Array2<Complex<f64>>,
+    processed: &Array2<f32>,
     output: &Path,
     format: OutputFormat,
     bit_depth: BitDepth,
@@ -49,7 +48,7 @@ pub fn save_processed_image(
     match format {
         OutputFormat::TIFF => {
             let (db_data, _, scaled_u8, scaled_u16) =
-                process_complex_data_pipeline(processed, bit_depth, strategy);
+                process_scalar_data_pipeline(processed, bit_depth, strategy);
             let shape = db_data.dim();
             let (rows, cols) = shape;
 
@@ -118,7 +117,7 @@ pub fn save_processed_image(
         }
         OutputFormat::JPEG => {
             let (db_data, _, scaled_u8, _) =
-                process_complex_data_pipeline(processed, BitDepth::U8, strategy);
+                process_scalar_data_pipeline(processed, BitDepth::U8, strategy);
             let shape = db_data.dim();
             let (rows, cols) = shape;
 
@@ -170,8 +169,8 @@ pub fn save_processed_image(
 }
 
 pub fn save_processed_multiband_image_sequential(
-    processed1: &Array2<Complex<f64>>,
-    processed2: &Array2<Complex<f64>>,
+    processed1: &Array2<f32>,
+    processed2: &Array2<f32>,
     output: &Path,
     format: OutputFormat,
     bit_depth: BitDepth,
@@ -201,7 +200,7 @@ pub fn save_processed_multiband_image_sequential(
             let (rows, cols) = shape;
 
             let (db_data, valid_mask, scaled_u8, scaled_u16) =
-                process_complex_data_pipeline(processed1, bit_depth, strategy);
+                process_scalar_data_pipeline(processed1, bit_depth, strategy);
 
             let (final_cols, final_rows, final_u8, final_u16, scale_x, scale_y, pad_left, pad_top) =
                 resize_image_data_with_meta(
@@ -240,7 +239,7 @@ pub fn save_processed_multiband_image_sequential(
                     drop(valid_mask);
 
                     let (_, _, scaled_u8, _) =
-                        process_complex_data_pipeline(processed2, bit_depth, strategy);
+                        process_scalar_data_pipeline(processed2, bit_depth, strategy);
 
                     let (_, _, final_u8_band2, _, _sx2, _sy2, _pl2, _pt2) =
                         resize_image_data_with_meta(
@@ -279,7 +278,7 @@ pub fn save_processed_multiband_image_sequential(
                     drop(valid_mask);
 
                     let (_, _, _, scaled_u16) =
-                        process_complex_data_pipeline(processed2, bit_depth, strategy);
+                        process_scalar_data_pipeline(processed2, bit_depth, strategy);
 
                     let (_, _, _, final_u16, _sx2, _sy2, _pl2, _pt2) = resize_image_data_with_meta(
                         &vec![],
@@ -317,7 +316,7 @@ pub fn save_processed_multiband_image_sequential(
             info!("Creating syntetic RGB JPEG from VV | HH (Red) and VH | HV (Green) bands");
 
             let (db_data, _, scaled_u8, _) =
-                process_complex_data_pipeline(processed1, BitDepth::U8, strategy);
+                process_scalar_data_pipeline(processed1, BitDepth::U8, strategy);
             let shape = db_data.dim();
             let (rows, cols) = shape;
 
@@ -333,7 +332,7 @@ pub fn save_processed_multiband_image_sequential(
                 )?;
 
             let (_, _, scaled_u8, _) =
-                process_complex_data_pipeline(processed2, BitDepth::U8, strategy);
+                process_scalar_data_pipeline(processed2, BitDepth::U8, strategy);
 
             let (_, _, final_u8_band2, _, _sx2, _sy2, _pl2, _pt2) = resize_image_data_with_meta(
                 &scaled_u8,

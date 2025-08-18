@@ -1,6 +1,5 @@
 use chrono;
 use ndarray::Array2;
-use num_complex::Complex;
 use quick_xml::Reader;
 use quick_xml::events::Event;
 use std::fs;
@@ -107,10 +106,10 @@ pub struct SafeReader {
     pub base_path: PathBuf,
     pub metadata: SafeMetadata,
     pub product_type: ProductType,
-    pub vv_data: Option<Array2<Complex<f64>>>,
-    pub vh_data: Option<Array2<Complex<f64>>>,
-    pub hh_data: Option<Array2<Complex<f64>>>,
-    pub hv_data: Option<Array2<Complex<f64>>>,
+    pub vv_data: Option<Array2<f32>>,
+    pub vh_data: Option<Array2<f32>>,
+    pub hh_data: Option<Array2<f32>>,
+    pub hv_data: Option<Array2<f32>>,
 }
 
 impl SafeReader {
@@ -861,7 +860,7 @@ impl SafeReader {
     fn load_polarization_data(
         file_path: &Path,
         metadata: &mut SafeMetadata,
-    ) -> Result<Array2<Complex<f64>>, SafeError> {
+    ) -> Result<Array2<f32>, SafeError> {
         info!("Loading underlying data from: {:?}", file_path);
 
         // Use GDAL to read GeoTIFF safely for large files
@@ -873,23 +872,17 @@ impl SafeReader {
         metadata.projection = Some(gdal_reader.metadata.projection.clone());
         metadata.crs = Some(gdal_reader.metadata.projection.clone());
 
-        // Read first band into f64 array
-        let arr_f64 = gdal_reader
+        // Read first band into f32 array
+        let arr_f32 = gdal_reader
             .read_band(1, Some(ResampleAlg::NearestNeighbour))
             .map_err(|e| SafeError::Parse(format!("GDAL error: {}", e)))?;
 
         // Update metadata dimensions
-        let (rows, cols) = (arr_f64.nrows(), arr_f64.ncols());
+        let (rows, cols) = (arr_f32.nrows(), arr_f32.ncols());
         metadata.lines = rows;
         metadata.samples = cols;
 
-        // Convert to Complex<f64>
-        let mut data = Array2::<Complex<f64>>::zeros((rows, cols));
-        for ((i, j), &v) in arr_f64.indexed_iter() {
-            data[[i, j]] = Complex::new(v, 0.0);
-        }
-
-        Ok(data)
+        Ok(arr_f32)
     }
 
     /// Load polarization data with optional warp to target CRS
@@ -899,7 +892,7 @@ impl SafeReader {
         target_crs: Option<&str>,
         resample_alg: Option<ResampleAlg>,
         target_size: Option<usize>,
-    ) -> Result<Array2<Complex<f64>>, SafeError> {
+    ) -> Result<Array2<f32>, SafeError> {
         if let Some(dst) = target_crs {
             info!("Warping to target CRS: {}", dst);
             let tmp_in = file_path;
@@ -956,17 +949,13 @@ impl SafeReader {
                         metadata.geotransform = Some(gdal_reader.metadata.geotransform);
                         metadata.projection = Some(gdal_reader.metadata.projection.clone());
                         metadata.crs = Some(gdal_reader.metadata.projection.clone());
-                        let arr_f64 = gdal_reader
+                        let arr_f32 = gdal_reader
                             .read_band(1, Some(ResampleAlg::NearestNeighbour))
                             .map_err(|e| SafeError::Parse(format!("GDAL error: {}", e)))?;
-                        let (rows, cols) = (arr_f64.nrows(), arr_f64.ncols());
+                        let (rows, cols) = (arr_f32.nrows(), arr_f32.ncols());
                         metadata.lines = rows;
                         metadata.samples = cols;
-                        let mut data = Array2::<Complex<f64>>::zeros((rows, cols));
-                        for ((i, j), &v) in arr_f64.indexed_iter() {
-                            data[[i, j]] = Complex::new(v, 0.0);
-                        }
-                        return Ok(data);
+                        return Ok(arr_f32);
                     }
                 }
             }
@@ -1043,18 +1032,12 @@ impl SafeReader {
             let band = ds
                 .rasterband(1)
                 .map_err(|e| SafeError::Parse(format!("GDAL error: {}", e)))?;
-            let buf: Buffer<f64> = band
+            let buf: Buffer<f32> = band
                 .read_as((0, 0), (size_x, size_y), (size_x, size_y), None)
                 .map_err(|e| SafeError::Parse(format!("GDAL error: {}", e)))?;
             let data_vec = buf.data().to_vec();
-            let mut data = Array2::<Complex<f64>>::zeros((size_y as usize, size_x as usize));
-            for i in 0..(size_y as usize) {
-                let row_offset = i * (size_x as usize);
-                for j in 0..(size_x as usize) {
-                    let v = data_vec[row_offset + j];
-                    data[[i, j]] = Complex::new(v, 0.0);
-                }
-            }
+            let data = Array2::from_shape_vec((size_y as usize, size_x as usize), data_vec)
+                .map_err(|_| SafeError::Parse("warped array shape error".to_string()))?;
             // Update dims
             metadata.lines = size_y as usize;
             metadata.samples = size_x as usize;
@@ -1092,16 +1075,12 @@ impl SafeReader {
                     }
                 }
             };
-            let arr_f64 = gdal_reader
+            let arr_f32 = gdal_reader
                 .read_band_resampled(1, out_cols, out_rows, Some(chosen_alg))
                 .map_err(|e| SafeError::Parse(format!("GDAL error: {}", e)))?;
             metadata.lines = out_rows;
             metadata.samples = out_cols;
-            let mut data = Array2::<Complex<f64>>::zeros((out_rows, out_cols));
-            for ((i, j), &v) in arr_f64.indexed_iter() {
-                data[[i, j]] = Complex::new(v, 0.0);
-            }
-            return Ok(data);
+            return Ok(arr_f32);
         }
         // No warp, full-resolution read
         Self::load_polarization_data(file_path, metadata)
@@ -1443,7 +1422,7 @@ impl SafeReader {
     }
 
     /// Retrieve the image data as a full Array2 (returns VV data if available, otherwise VH)
-    pub fn data(&self) -> Result<Array2<Complex<f64>>, SafeError> {
+    pub fn data(&self) -> Result<Array2<f32>, SafeError> {
         if let Some(ref arr) = self.vv_data {
             Ok(arr.clone())
         } else if let Some(ref arr) = self.vh_data {
@@ -1454,7 +1433,7 @@ impl SafeReader {
     }
 
     /// Get VV data
-    pub fn vv_data(&self) -> Result<Array2<Complex<f64>>, SafeError> {
+    pub fn vv_data(&self) -> Result<Array2<f32>, SafeError> {
         let arr = self
             .vv_data
             .as_ref()
@@ -1463,7 +1442,7 @@ impl SafeReader {
     }
 
     /// Get VH data
-    pub fn vh_data(&self) -> Result<Array2<Complex<f64>>, SafeError> {
+    pub fn vh_data(&self) -> Result<Array2<f32>, SafeError> {
         let arr = self
             .vh_data
             .as_ref()
@@ -1472,7 +1451,7 @@ impl SafeReader {
     }
 
     /// Get HH data
-    pub fn hh_data(&self) -> Result<Array2<Complex<f64>>, SafeError> {
+    pub fn hh_data(&self) -> Result<Array2<f32>, SafeError> {
         let arr = self
             .hh_data
             .as_ref()
@@ -1481,7 +1460,7 @@ impl SafeReader {
     }
 
     /// Get HV data
-    pub fn hv_data(&self) -> Result<Array2<Complex<f64>>, SafeError> {
+    pub fn hv_data(&self) -> Result<Array2<f32>, SafeError> {
         let arr = self
             .hv_data
             .as_ref()
@@ -1490,7 +1469,7 @@ impl SafeReader {
     }
 
     /// Get sum of VV and VH data (vv + vh)
-    pub fn sum_data(&self) -> Result<Array2<Complex<f64>>, SafeError> {
+    pub fn sum_data(&self) -> Result<Array2<f32>, SafeError> {
         info!("Summing VV and VH data");
         let vv = self.vv_data()?;
         let vh = self.vh_data()?;
@@ -1498,7 +1477,7 @@ impl SafeReader {
     }
 
     /// Get difference of VV and VH data (vv - vh)
-    pub fn difference_data(&self) -> Result<Array2<Complex<f64>>, SafeError> {
+    pub fn difference_data(&self) -> Result<Array2<f32>, SafeError> {
         info!("Differencing VV and VH data");
         let vv = self.vv_data()?;
         let vh = self.vh_data()?;
@@ -1506,7 +1485,7 @@ impl SafeReader {
     }
 
     /// Get ratio of VV and VH data (vv / vh, with zero handling)
-    pub fn ratio_data(&self) -> Result<Array2<Complex<f64>>, SafeError> {
+    pub fn ratio_data(&self) -> Result<Array2<f32>, SafeError> {
         info!("Calculating ratio of VV and VH data");
         let vv = self.vv_data()?;
         let vh = self.vh_data()?;
@@ -1514,7 +1493,7 @@ impl SafeReader {
     }
 
     /// Get normalized difference of VV and VH data ((vv - vh) / (vv + vh))
-    pub fn normalized_diff_data(&self) -> Result<Array2<Complex<f64>>, SafeError> {
+    pub fn normalized_diff_data(&self) -> Result<Array2<f32>, SafeError> {
         info!("Calculating normalized difference of VV and VH data");
         let vv = self.vv_data()?;
         let vh = self.vh_data()?;
@@ -1524,7 +1503,7 @@ impl SafeReader {
     }
 
     /// Get log ratio of VV and VH data (10 * log10(vv / vh))
-    pub fn log_ratio_data(&self) -> Result<Array2<Complex<f64>>, SafeError> {
+    pub fn log_ratio_data(&self) -> Result<Array2<f32>, SafeError> {
         info!("Calculating log ratio of VV and VH data");
         let vv = self.vv_data()?;
         let vh = self.vh_data()?;
@@ -1533,7 +1512,7 @@ impl SafeReader {
 
     // HH/HV pair operations
     /// Get sum of HH and HV data (hh + hv)
-    pub fn sum_hh_hv_data(&self) -> Result<Array2<Complex<f64>>, SafeError> {
+    pub fn sum_hh_hv_data(&self) -> Result<Array2<f32>, SafeError> {
         info!("Summing HH and HV data");
         let hh = self.hh_data()?;
         let hv = self.hv_data()?;
@@ -1541,7 +1520,7 @@ impl SafeReader {
     }
 
     /// Get difference of HH and HV data (hh - hv)
-    pub fn difference_hh_hv_data(&self) -> Result<Array2<Complex<f64>>, SafeError> {
+    pub fn difference_hh_hv_data(&self) -> Result<Array2<f32>, SafeError> {
         info!("Differencing HH and HV data");
         let hh = self.hh_data()?;
         let hv = self.hv_data()?;
@@ -1549,7 +1528,7 @@ impl SafeReader {
     }
 
     /// Get ratio of HH and HV data (hh / hv, with zero handling)
-    pub fn ratio_hh_hv_data(&self) -> Result<Array2<Complex<f64>>, SafeError> {
+    pub fn ratio_hh_hv_data(&self) -> Result<Array2<f32>, SafeError> {
         info!("Calculating ratio of HH and HV data");
         let hh = self.hh_data()?;
         let hv = self.hv_data()?;
@@ -1557,7 +1536,7 @@ impl SafeReader {
     }
 
     /// Get normalized difference of HH and HV data ((hh - hv) / (hh + hv))
-    pub fn normalized_diff_hh_hv_data(&self) -> Result<Array2<Complex<f64>>, SafeError> {
+    pub fn normalized_diff_hh_hv_data(&self) -> Result<Array2<f32>, SafeError> {
         info!("Calculating normalized difference of HH and HV data");
         let hh = self.hh_data()?;
         let hv = self.hv_data()?;
@@ -1567,7 +1546,7 @@ impl SafeReader {
     }
 
     /// Get log ratio of HH and HV data (10 * log10(hh / hv))
-    pub fn log_ratio_hh_hv_data(&self) -> Result<Array2<Complex<f64>>, SafeError> {
+    pub fn log_ratio_hh_hv_data(&self) -> Result<Array2<f32>, SafeError> {
         info!("Calculating log ratio of HH and HV data");
         let hh = self.hh_data()?;
         let hv = self.hv_data()?;

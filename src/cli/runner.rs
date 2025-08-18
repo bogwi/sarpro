@@ -1,7 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
 
-use num_complex::Complex;
 use tracing::{info, warn};
 
 use gdal::raster::ResampleAlg;
@@ -141,7 +140,7 @@ fn process_single_file(
                 _ => unreachable!(),
             };
 
-            let bytes = processed.len() * std::mem::size_of::<Complex<f64>>();
+            let bytes = processed.len() * std::mem::size_of::<f32>();
             info!(
                 "Memory usage (approx): {:.2} MB",
                 bytes as f64 / 1024.0 / 1024.0
@@ -165,7 +164,7 @@ fn process_single_file(
                 let vh_processed = reader.vh_data()?;
 
                 let total_bytes =
-                    (vv_processed.len() + vh_processed.len()) * std::mem::size_of::<Complex<f64>>();
+                    (vv_processed.len() + vh_processed.len()) * std::mem::size_of::<f32>();
                 info!(
                     "Memory usage (Multiband VV/VH): {:.2} MB",
                     total_bytes as f64 / 1024.0 / 1024.0
@@ -188,7 +187,7 @@ fn process_single_file(
                 let hv_processed = reader.hv_data()?;
 
                 let total_bytes =
-                    (hh_processed.len() + hv_processed.len()) * std::mem::size_of::<Complex<f64>>();
+                    (hh_processed.len() + hv_processed.len()) * std::mem::size_of::<f32>();
                 info!(
                     "Memory usage (Multiband HH/HV): {:.2} MB",
                     total_bytes as f64 / 1024.0 / 1024.0
@@ -251,7 +250,7 @@ fn process_single_file(
                 .into());
             };
 
-            let bytes = processed.len() * std::mem::size_of::<Complex<f64>>();
+            let bytes = processed.len() * std::mem::size_of::<f32>();
             info!(
                 "Memory usage (approx): {:.2} MB",
                 bytes as f64 / 1024.0 / 1024.0

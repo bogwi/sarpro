@@ -4,7 +4,6 @@ use crate::gui::models::init_gui_logging;
 use crate::io::sentinel1::SafeReader;
 use crate::{AutoscaleStrategy, InputFormat, Polarization, PolarizationOperation};
 use crate::{BitDepth, OutputFormat};
-use num_complex::Complex;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -270,7 +269,7 @@ impl SarproGui {
                     _ => unreachable!(),
                 };
 
-                let bytes = processed.len() * std::mem::size_of::<Complex<f64>>();
+                let bytes = processed.len() * std::mem::size_of::<f32>();
                 info!(
                     "Memory usage (approx): {:.2} MB",
                     bytes as f64 / 1024.0 / 1024.0
@@ -307,8 +306,8 @@ impl SarproGui {
                         vh_processed.ncols()
                     );
 
-                    let total_bytes = (vv_processed.len() + vh_processed.len())
-                        * std::mem::size_of::<num_complex::Complex<f64>>();
+                    let total_bytes =
+                        (vv_processed.len() + vh_processed.len()) * std::mem::size_of::<f32>();
                     info!(
                         "Memory usage (Multiband VV/VH): {:.2} MB",
                         total_bytes as f64 / 1024.0 / 1024.0
@@ -343,8 +342,8 @@ impl SarproGui {
                         hv_processed.ncols()
                     );
 
-                    let total_bytes = (hh_processed.len() + hv_processed.len())
-                        * std::mem::size_of::<num_complex::Complex<f64>>();
+                    let total_bytes =
+                        (hh_processed.len() + hv_processed.len()) * std::mem::size_of::<f32>();
                     info!(
                         "Memory usage (Multiband HH/HV): {:.2} MB",
                         total_bytes as f64 / 1024.0 / 1024.0
@@ -417,7 +416,7 @@ impl SarproGui {
                     .into());
                 };
 
-                let bytes = processed.len() * std::mem::size_of::<Complex<f64>>();
+                let bytes = processed.len() * std::mem::size_of::<f32>();
                 info!(
                     "Memory usage (approx): {:.2} MB",
                     bytes as f64 / 1024.0 / 1024.0
