@@ -13,7 +13,7 @@ use crate::core::processing::save::{
 };
 use crate::core::processing::synthetic_rgb::create_synthetic_rgb;
 use crate::error::{Error, Result};
-use crate::io::sentinel1::{SafeMetadata, SafeReader};
+use crate::io::sentinel1::{TargetCrsArg, SafeMetadata, SafeReader};
 use crate::types::{
     AutoscaleStrategy, BitDepth, BitDepthArg, OutputFormat, Polarization, PolarizationOperation,
     ProcessingOperation,
@@ -442,11 +442,26 @@ pub fn process_safe_to_path(input: &Path, output: &Path, params: &ProcessingPara
     let bit_depth = bitdepth_arg_to_bitdepth(params.bit_depth);
 
     // Open reader according to polarization
+    // Map target CRS into internal enum; resolution happens inside reader
+    let target_arg: Option<TargetCrsArg> = match params.target_crs.as_deref() {
+        Some(t) if t.eq_ignore_ascii_case("none") => Some(TargetCrsArg::None),
+        Some(t) if t.eq_ignore_ascii_case("auto") => Some(TargetCrsArg::Auto),
+        Some(t) => Some(TargetCrsArg::Custom(t.to_string())),
+        None => None,
+    };
+
+    let resample_alg = match params.resample_alg.as_deref() {
+        Some("nearest") => Some(gdal::raster::ResampleAlg::NearestNeighbour),
+        Some("cubic") => Some(gdal::raster::ResampleAlg::Cubic),
+        Some("lanczos") => Some(gdal::raster::ResampleAlg::Lanczos),
+        _ => Some(gdal::raster::ResampleAlg::Bilinear),
+    };
+
     let reader = SafeReader::open_with_options(
         input,
         pol_to_reader_hint(&params.polarization),
-        None,
-        None,
+        target_arg,
+        resample_alg,
         params.size,
     )?;
 

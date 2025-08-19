@@ -7,6 +7,7 @@ use gdal::raster::ResampleAlg;
 use sarpro::core::processing::save::{
     save_processed_image, save_processed_multiband_image_sequential,
 };
+use sarpro::io::sentinel1::TargetCrsArg;
 use sarpro::io::SafeReader;
 use sarpro::types::{BitDepth, OutputFormat, ProcessingOperation};
 use sarpro::{AutoscaleStrategy, BitDepthArg, InputFormat, Polarization, PolarizationOperation};
@@ -63,15 +64,17 @@ fn process_single_file(
                     Some("lanczos") => Some(ResampleAlg::Lanczos),
                     _ => None,
                 };
-                // Map target CRS with 'none' disabling reprojection
-                let tgt_opt = match target_crs {
-                    Some(t) if !t.eq_ignore_ascii_case("none") => Some(t),
-                    _ => None,
+                // Map target CRS string into internal enum; resolution happens inside reader
+                let target_arg: Option<TargetCrsArg> = match target_crs {
+                    Some(t) if t.eq_ignore_ascii_case("none") => Some(TargetCrsArg::None),
+                    Some(t) if t.eq_ignore_ascii_case("auto") => Some(TargetCrsArg::Auto),
+                    Some(t) => Some(TargetCrsArg::Custom(t.to_string())),
+                    None => None,
                 };
                 match SafeReader::open_with_warnings_with_options(
                     input,
                     polarization_str,
-                    tgt_opt,
+                    target_arg,
                     resample,
                     target_size,
                 )? {
@@ -93,34 +96,19 @@ fn process_single_file(
                     Some("lanczos") => Some(ResampleAlg::Lanczos),
                     _ => None,
                 };
-                if let Some(tgt) = target_crs {
-                    if tgt.eq_ignore_ascii_case("none") {
-                        // Explicitly disable reprojection but allow target-size downsample
-                        SafeReader::open_with_options(
-                            input,
-                            polarization_str,
-                            None,
-                            resample_alg,
-                            target_size,
-                        )?
-                    } else {
-                        SafeReader::open_with_options(
-                            input,
-                            polarization_str,
-                            Some(tgt),
-                            resample_alg,
-                            target_size,
-                        )?
-                    }
-                } else {
-                    SafeReader::open_with_options(
-                        input,
-                        polarization_str,
-                        None,
-                        resample_alg,
-                        target_size,
-                    )?
-                }
+                let target_arg: Option<TargetCrsArg> = match target_crs {
+                    Some(t) if t.eq_ignore_ascii_case("none") => Some(TargetCrsArg::None),
+                    Some(t) if t.eq_ignore_ascii_case("auto") => Some(TargetCrsArg::Auto),
+                    Some(t) => Some(TargetCrsArg::Custom(t.to_string())),
+                    None => None,
+                };
+                SafeReader::open_with_options(
+                    input,
+                    polarization_str,
+                    target_arg,
+                    resample_alg,
+                    target_size,
+                )?
             }
         }
     };

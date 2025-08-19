@@ -449,7 +449,7 @@ impl OptionsComponent {
                 });
             });
             ui.label(
-                RichText::new("Map projection to reproject into (e.g., EPSG:4326, EPSG:32633). Type 'none' (or leave blank) to disable reprojection. Default: EPSG:32630.")
+                RichText::new("Map projection to reproject into (e.g., EPSG:4326, EPSG:32633). Type 'auto' to detect UTM from metadata, 'none' (or leave blank) to disable. Default: EPSG:32630.")
                     .color(Color32::from_gray(120))
                     .size(11.0)
             );

@@ -62,7 +62,8 @@ pub struct CliArgs {
     #[arg(long, default_value_t = false)]
     pub pad: bool,
 
-    /// Optional target CRS for map reprojection (e.g., EPSG:4326, EPSG:32633)
+    /// Optional target CRS for map reprojection (e.g., EPSG:4326, EPSG:32633).
+    /// Special values: 'auto' (detect UTM from metadata), 'none' (disable)
     #[arg(long)]
     pub target_crs: Option<String>,
 

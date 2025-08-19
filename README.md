@@ -12,7 +12,8 @@ A high-performance Sentinel-1 Synthetic Aperture Radar (SAR) GRD product to imag
 - **Output Formats**: TIFF and JPEG support with configurable bit depths
 - **Memory Efficient**: Optimized for processing large SAR datasets
 - **I/O Optimized**: Performance typically limited by disk I/O, not CPU processing
-- **since v0.2.0 (unreleased)**: Can now reproject to any CRS and resample with nearest, bilinear, or cubic algorithms
+- **since v0.2.0**: Can now reproject to any CRS and resample with nearest, bilinear, cubic, or lanczos algorithms
+- **since v0.3.0**: Can now automatically detect the target CRS from the product metadata and use it for reprojection.
 
 ## ROADMAP and ROADMAP_explained
 See [ROADMAP.md](ROADMAP.md) for the high‑level phases and upcoming features. See [ROADMAP_explained.md](ROADMAP_explained.md) for the detailed technical explanation. This highlights what’s coming (COG/STAC, masking, speckle filters, DEM‑based RTC, tiling, time‑series) and expected release groupings.
@@ -219,7 +220,7 @@ cargo run --release --bin sarpro -- -i data.SAFE -o output.tiff \
 - `--batch`: Enable batch mode with error resilience
 - `--log`: Enable detailed logging
 
-- `--target-crs`: Optional target CRS for map reprojection (e.g., `EPSG:4326`, `EPSG:32633`); use `none` to disable reprojection explicitly
+- `--target-crs`: Optional target CRS for map reprojection (e.g., `EPSG:4326`, `EPSG:32633`). Special values: `auto` (detect UTM zone from metadata), `none` (disable reprojection)
 - `--resample-alg`: Resampling algorithm for reprojection (`nearest`, `bilinear`, `cubic`) — default: `bilinear`
 
 ### Graphical User Interface (GUI)

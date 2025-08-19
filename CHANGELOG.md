@@ -1,5 +1,21 @@
 ### Changelog
 
+### [0.2.12] - 2025-08-19 (Unpublished)
+
+- **Added**:
+  - Auto target CRS (UTM/UPS) via `--target-crs auto` resolves exactly once per SAFE product during open and is reused for all band loads.
+    - Candidate measurement is selected from the SAFE `measurement/` folder (prefers VV/VH, else HH/HV, else first TIFF).
+    - Logs: INFO for candidate and resolved EPSG; WARN on failure (falls back to no warp).
+
+- **Changed**:
+  - CLI/GUI/API continue to accept `--target-crs auto | none | EPSG:nnnn`; no changes to user workflows.
+
+- **Performance**:
+  - Avoids an extra dataset open when using `auto`, reducing I/O latency notably in batch processing.
+
+- **Compatibility**:
+  - User-facing behavior is unchanged; existing commands and presets continue to work.
+
 ### [0.2.11] - 2025-08-18 (Unpublished)
 
 - **Added**:

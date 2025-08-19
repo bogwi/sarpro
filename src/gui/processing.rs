@@ -205,15 +205,17 @@ impl SarproGui {
                         _ => Some(gdal::raster::ResampleAlg::Bilinear),
                     };
                     let trimmed = self.target_crs.trim();
-                    let tgt_opt = if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") {
+                    let target_arg = if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") {
                         None
+                    } else if trimmed.eq_ignore_ascii_case("auto") {
+                        Some(crate::io::sentinel1::TargetCrsArg::Auto)
                     } else {
-                        Some(trimmed)
+                        Some(crate::io::sentinel1::TargetCrsArg::Custom(trimmed.to_string()))
                     };
                     match SafeReader::open_with_warnings_with_options(
                         input,
                         polarization_str,
-                        tgt_opt,
+                        target_arg,
                         resample,
                         target_size,
                     )? {
@@ -239,16 +241,18 @@ impl SarproGui {
                         _ => Some(gdal::raster::ResampleAlg::Bilinear),
                     };
                     // Use target CRS if provided; treat "none" (case-insensitive) or blank as no reprojection
-                    let trimmed = self.target_crs.trim().to_string();
-                    let tgt_opt = if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") {
+                    let trimmed = self.target_crs.trim();
+                    let target_arg = if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") {
                         None
+                    } else if trimmed.eq_ignore_ascii_case("auto") {
+                        Some(crate::io::sentinel1::TargetCrsArg::Auto)
                     } else {
-                        Some(trimmed.as_str())
+                        Some(crate::io::sentinel1::TargetCrsArg::Custom(trimmed.to_string()))
                     };
                     let reader = SafeReader::open_with_options(
                         input,
                         polarization_str,
-                        tgt_opt,
+                        target_arg,
                         resample,
                         target_size,
                     )?;
