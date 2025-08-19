@@ -171,3 +171,23 @@ pub enum BitDepth {
     U8,
     U16,
 }
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug, Serialize, Deserialize)]
+#[value(rename_all = "kebab-case")]
+pub enum SyntheticRgbMode {
+    Default,
+    RgbRatio,
+    SarUrban,
+    Enhanced,
+}
+
+impl std::fmt::Display for SyntheticRgbMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SyntheticRgbMode::Default => write!(f, "Default"),
+            SyntheticRgbMode::RgbRatio => write!(f, "RgbRatio"),
+            SyntheticRgbMode::SarUrban => write!(f, "SarUrban"),
+            SyntheticRgbMode::Enhanced => write!(f, "Enhanced"),
+        }
+    }
+}

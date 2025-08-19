@@ -65,3 +65,30 @@ pub fn create_synthetic_rgb(band1_data: &[u8], band2_data: &[u8]) -> Vec<u8> {
 
     rgb_data
 }
+
+use crate::types::SyntheticRgbMode;
+
+/// Dispatcher for synthetic RGB composition by mode. For now, all modes map to Default.
+pub fn create_synthetic_rgb_by_mode(mode: SyntheticRgbMode, band1_data: &[u8], band2_data: &[u8]) -> Vec<u8> {
+    match mode {
+        SyntheticRgbMode::Default => create_synthetic_rgb(band1_data, band2_data),
+        SyntheticRgbMode::RgbRatio => create_synthetic_rgb(band1_data, band2_data),
+        SyntheticRgbMode::SarUrban => create_synthetic_rgb(band1_data, band2_data),
+        SyntheticRgbMode::Enhanced => create_synthetic_rgb(band1_data, band2_data),
+    }
+}
+
+/// Placeholder for future implementation of Copernicus "RGB ratio" mode.
+pub fn create_synthetic_rgb_rgb_ratio(_band1_data: &[u8], _band2_data: &[u8]) -> Vec<u8> {
+    todo!("create_synthetic_rgb_rgb_ratio: to be implemented")
+}
+
+/// Placeholder for future implementation of Copernicus "SAR Urban" mode.
+pub fn create_synthetic_rgb_urban(_band1_data: &[u8], _band2_data: &[u8]) -> Vec<u8> {
+    todo!("create_synthetic_rgb_urban: to be implemented")
+}
+
+/// Placeholder for future implementation of Copernicus "Enhanced visualization" mode.
+pub fn create_synthetic_rgb_enhanced(_band1_data: &[u8], _band2_data: &[u8]) -> Vec<u8> {
+    todo!("create_synthetic_rgb_enhanced: to be implemented")
+}

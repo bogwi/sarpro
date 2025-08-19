@@ -389,6 +389,36 @@ pub fn create_jpeg_metadata_sidecar_with_overrides(
     Ok(())
 }
 
+/// Create a sidecar metadata file with overrides and extra key/value fields
+pub fn create_jpeg_metadata_sidecar_with_overrides_and_extras(
+    output_path: &Path,
+    meta: &SafeMetadata,
+    operation: Option<&str>,
+    geotransform_override: Option<[f64; 6]>,
+    projection_override: Option<&str>,
+    extras: Option<&[(&str, String)]>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let metadata = extract_metadata_fields(meta, operation);
+    let mut json_metadata = convert_metadata_to_json(&metadata);
+    add_special_json_fields(
+        &mut json_metadata,
+        meta,
+        geotransform_override,
+        projection_override,
+    );
+    if let Some(extra_fields) = extras {
+        for (k, v) in extra_fields {
+            // Keep keys lowercase for consistency with JSON fields
+            json_metadata.insert(k.to_lowercase(), serde_json::Value::String(v.clone()));
+        }
+    }
+    let sidecar_path = output_path.with_extension("json");
+    let json_string = serde_json::to_string_pretty(&json_metadata)?;
+    std::fs::write(&sidecar_path, json_string)?;
+    info!("Created JPEG metadata sidecar: {:?}", sidecar_path);
+    Ok(())
+}
+
 /// Generic metadata handler that can work with any format
 pub fn handle_metadata(
     meta: &SafeMetadata,

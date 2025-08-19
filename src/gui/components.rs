@@ -1,6 +1,7 @@
 use super::models::{SarproGui, SizeMode};
 use crate::{AutoscaleStrategy, Polarization, PolarizationOperation};
 use crate::{BitDepth, OutputFormat};
+use crate::types::SyntheticRgbMode;
 use eframe::egui::{Align, Color32, ComboBox, Frame, Layout, RichText, Ui};
 
 const COMPONENT_HEIGHT: f32 = 80.0;
@@ -239,6 +240,29 @@ impl FormatOptionsComponent {
                 });
             });
 
+            // Synthetic RGB mode: only relevant when JPEG + Multiband
+            if app.output_format == OutputFormat::JPEG && matches!(app.polarization, Polarization::Multiband) {
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    ui.label("synRGB mode:");
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ComboBox::from_id_salt("synrgb_mode")
+                            .selected_text(match app.synrgb_mode {
+                                SyntheticRgbMode::Default => "Default".to_string(),
+                                SyntheticRgbMode::RgbRatio => "RGB ratio".to_string(),
+                                SyntheticRgbMode::SarUrban => "SAR Urban".to_string(),
+                                SyntheticRgbMode::Enhanced => "Enhanced".to_string(),
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut app.synrgb_mode, SyntheticRgbMode::Default, "Default");
+                                ui.selectable_value(&mut app.synrgb_mode, SyntheticRgbMode::RgbRatio, "RGB ratio");
+                                ui.selectable_value(&mut app.synrgb_mode, SyntheticRgbMode::SarUrban, "SAR Urban");
+                                ui.selectable_value(&mut app.synrgb_mode, SyntheticRgbMode::Enhanced, "Enhanced");
+                            });
+                    });
+                });
+            }
+
             ui.add_space(10.0);
 
             let polarization_info = match app.polarization {
@@ -256,7 +280,7 @@ impl FormatOptionsComponent {
                 },
                 Polarization::Multiband => {
                     if app.output_format == OutputFormat::JPEG {
-                        "Multiband (synthetic RGB). The output is R=VV|HH, G=VH|HV, B=VV|HH/VH|HV with gamma correction for each channel. Use Tamed or Clahe autoscale strategy for maximum contrast."
+                        "Multiband (synthetic RGB). Choose mode in the dropdown below. Default uses R=VV|HH, G=VH|HV, B=ratio with gamma/LUTs. Use Tamed or CLAHE for contrast."
                     } else {
                         "Multiband. The output is grayscale. Use with Tamed or Clahe autoscale strategy to isolate the ground from the water."
                     }

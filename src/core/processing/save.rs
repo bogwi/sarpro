@@ -5,17 +5,17 @@ use tracing::info;
 use crate::core::processing::pipeline::process_scalar_data_pipeline;
 use crate::core::processing::autoscale::autoscale_db_image_tamed_synrgb_u8;
 use crate::core::processing::resize::resize_image_data_with_meta;
-use crate::core::processing::synthetic_rgb::create_synthetic_rgb;
+use crate::core::processing::synthetic_rgb::create_synthetic_rgb_by_mode;
 use crate::io::writers::jpeg::{write_gray_jpeg, write_rgb_jpeg};
 use crate::io::writers::metadata::{
-    create_jpeg_metadata_sidecar_with_overrides, embed_tiff_metadata,
+    create_jpeg_metadata_sidecar_with_overrides, create_jpeg_metadata_sidecar_with_overrides_and_extras, embed_tiff_metadata,
 };
 use crate::io::writers::tiff::{
     write_tiff_multiband_u8, write_tiff_multiband_u16, write_tiff_u8, write_tiff_u16,
 };
 use crate::io::writers::worldfile::{write_prj_file, write_world_file};
 use crate::types::{
-    AutoscaleStrategy, BitDepth, OutputFormat, PolarizationOperation, ProcessingOperation,
+    AutoscaleStrategy, BitDepth, OutputFormat, PolarizationOperation, ProcessingOperation, SyntheticRgbMode,
 };
 
 // resize_image_data moved to crate::core::processing::resize
@@ -180,6 +180,7 @@ pub fn save_processed_multiband_image_sequential(
     pad: bool,
     strategy: AutoscaleStrategy,
     operation: ProcessingOperation,
+    syn_mode: SyntheticRgbMode,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let operation_label: Option<String> = match operation {
         ProcessingOperation::SingleBand => None,
@@ -359,7 +360,7 @@ pub fn save_processed_multiband_image_sequential(
                 pad,
             )?;
 
-            let rgb_data = create_synthetic_rgb(&final_u8_band1, &final_u8_band2);
+            let rgb_data = create_synthetic_rgb_by_mode(syn_mode, &final_u8_band1, &final_u8_band2);
 
             write_rgb_jpeg(output, final_cols, final_rows, &rgb_data)?;
 
@@ -382,18 +383,18 @@ pub fn save_processed_multiband_image_sequential(
                     write_prj_file(output, p)?;
                     proj_override = Some(p.clone());
                 }
-                create_jpeg_metadata_sidecar_with_overrides(
+                // Attach synthetic_rgb_mode to JPEG sidecar
+                create_jpeg_metadata_sidecar_with_overrides_and_extras(
                     output,
                     meta,
                     operation_label.as_deref(),
                     gt_override,
                     proj_override.as_deref(),
+                    Some(&[("synthetic_rgb_mode", syn_mode.to_string())]),
                 )?;
             }
 
-            info!(
-                "Syntetic RGB JPEG saved (VV | HH=Red, VH | HV=Green, VV/VH=Blue) with metadata sidecar"
-            );
+            info!("Syntetic RGB JPEG saved with metadata sidecar");
         }
     }
     Ok(())

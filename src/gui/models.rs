@@ -1,6 +1,7 @@
 use crate::gui::logging::{GuiLogLayer, LogEntry};
 use crate::{AutoscaleStrategy, InputFormat, Polarization, PolarizationOperation};
 use crate::{BitDepth, OutputFormat};
+use crate::types::SyntheticRgbMode;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -48,6 +49,7 @@ pub struct SarproGui {
     pub bit_depth: BitDepth,
     pub polarization: Polarization,
     pub autoscale: AutoscaleStrategy,
+    pub synrgb_mode: SyntheticRgbMode,
 
     // Reprojection parameters
     pub target_crs: String,
@@ -95,6 +97,7 @@ impl Default for SarproGui {
             bit_depth: BitDepth::U8,
             polarization: Polarization::Vv,
             autoscale: AutoscaleStrategy::Clahe,
+            synrgb_mode: SyntheticRgbMode::Default,
             target_crs: "EPSG:32630".to_string(),
             resample_alg: "lanczos".to_string(),
             size_mode: SizeMode::Original,
@@ -211,6 +214,7 @@ impl SarproGui {
             bit_depth: BitDepth,
             polarization: Polarization,
             autoscale: AutoscaleStrategy,
+            synrgb_mode: SyntheticRgbMode,
             target_crs: String,
             resample_alg: String,
             size_mode: SizeMode,
@@ -226,6 +230,7 @@ impl SarproGui {
             bit_depth: self.bit_depth,
             polarization: self.polarization,
             autoscale: self.autoscale,
+            synrgb_mode: self.synrgb_mode,
             target_crs: self.target_crs.clone(),
             resample_alg: self.resample_alg.clone(),
             size_mode: self.size_mode,
@@ -291,6 +296,7 @@ impl SarproGui {
                 bit_depth: BitDepth,
                 polarization: Polarization,
                 autoscale: AutoscaleStrategy,
+                synrgb_mode: SyntheticRgbMode,
                 target_crs: String,
                 resample_alg: String,
                 size_mode: SizeMode,
@@ -318,6 +324,7 @@ impl SarproGui {
             self.bit_depth = preset.bit_depth;
             self.polarization = preset.polarization;
             self.autoscale = preset.autoscale;
+            self.synrgb_mode = preset.synrgb_mode;
             self.target_crs = preset.target_crs;
             self.resample_alg = preset.resample_alg;
             self.size_mode = preset.size_mode;
@@ -384,6 +391,17 @@ impl SarproGui {
             AutoscaleStrategy::Default => "default",
         };
         cmd.push_str(&format!(" --autoscale {}", autoscale_cli));
+
+        // Add synthetic RGB mode when applicable
+        if self.output_format == OutputFormat::JPEG && matches!(self.polarization, Polarization::Multiband) {
+            let mode_cli = match self.synrgb_mode {
+                SyntheticRgbMode::Default => "default",
+                SyntheticRgbMode::RgbRatio => "rgb-ratio",
+                SyntheticRgbMode::SarUrban => "sar-urban",
+                SyntheticRgbMode::Enhanced => "enhanced",
+            };
+            cmd.push_str(&format!(" --synrgb-mode {}", mode_cli));
+        }
 
         // Add reprojection options
         if !self.target_crs.trim().is_empty() {

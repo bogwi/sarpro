@@ -1,7 +1,7 @@
 use clap::Parser;
 use std::path::PathBuf;
 
-use sarpro::types::OutputFormat;
+use sarpro::types::{OutputFormat, SyntheticRgbMode};
 use sarpro::{AutoscaleStrategy, BitDepthArg, InputFormat, Polarization};
 
 #[derive(Parser)]
@@ -70,4 +70,8 @@ pub struct CliArgs {
     /// Optional resampling algorithm (nearest, bilinear, cubic, lanczos)
     #[arg(long)]
     pub resample_alg: Option<String>,
+
+    /// Synthetic RGB mode (only used when --format jpeg and --polarization multiband)
+    #[arg(long = "synrgb-mode", value_enum, default_value_t = SyntheticRgbMode::Default)]
+    pub synrgb_mode: SyntheticRgbMode,
 }

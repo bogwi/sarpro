@@ -1,5 +1,23 @@
 ### Changelog
 
+### [0.2.13] - 2025-08-19 (Unpublished)
+
+- **Added**:
+  - Synthetic RGB modes plumbing for multiband JPEG quicklooks: `default | rgb-ratio | sar-urban | enhanced`.
+    - New enum `SyntheticRgbMode` in `src/types.rs` with CLI/GUI/serde wiring.
+    - CLI flag `--synrgb-mode` (applies only when `--format jpeg` and `--polarization multiband`).
+    - GUI dropdown to select mode; presets persist the value; CLI command generator includes `--synrgb-mode` when applicable.
+    - Library: `ProcessingParams` gains `synrgb_mode` (default `Default`); added `process_safe_to_buffer_with_mode(...)`.
+    - Save pipeline accepts the mode and dispatches via `create_synthetic_rgb_by_mode(...)`.
+    - JPEG sidecar now includes `synthetic_rgb_mode` for multiband JPEG outputs.
+
+- **Changed**:
+  - Default behavior preserved: when no mode is specified, `Default` mapping is used.
+  - TIFF and single-band paths unaffected; mode parameter is ignored outside multiband JPEG.
+
+- **Deferred**:
+  - Algorithms for `RgbRatio`, `SarUrban`, and `Enhanced` are intentionally not implemented yet; the dispatcher temporarily routes all modes to the existing default synRGB. Placeholders with `todo!()` were added for future implementations.
+
 ### [0.2.12] - 2025-08-19 (Unpublished)
 
 - **Added**:

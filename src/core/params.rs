@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::types::OutputFormat;
+use crate::types::{OutputFormat, SyntheticRgbMode};
 use crate::{AutoscaleStrategy, BitDepthArg, InputFormat, Polarization};
 
 /// Processing parameters suitable for config files and GUI presets
@@ -11,6 +11,8 @@ pub struct ProcessingParams {
     pub bit_depth: BitDepthArg,
     pub polarization: Polarization,
     pub autoscale: AutoscaleStrategy,
+    /// Synthetic RGB mode for multiband JPEG outputs; ignored otherwise
+    pub synrgb_mode: SyntheticRgbMode,
     /// Target long side in pixels; None means original size
     pub size: Option<usize>,
     /// If true, zero-pad to square after resizing
@@ -29,6 +31,7 @@ impl Default for ProcessingParams {
             bit_depth: BitDepthArg::U8,
             polarization: Polarization::Vv,
             autoscale: AutoscaleStrategy::Clahe,
+            synrgb_mode: SyntheticRgbMode::Default,
             size: None,
             pad: false,
             target_crs: None,

@@ -4,6 +4,7 @@ use crate::gui::models::init_gui_logging;
 use crate::io::sentinel1::SafeReader;
 use crate::{AutoscaleStrategy, InputFormat, Polarization, PolarizationOperation};
 use crate::{BitDepth, OutputFormat};
+// use crate::types::SyntheticRgbMode;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -329,6 +330,7 @@ impl SarproGui {
                         pad,
                         autoscale,
                         crate::types::ProcessingOperation::MultibandVvVh,
+                        self.synrgb_mode,
                     )
                 } else if reader.hh_data().is_ok() && reader.hv_data().is_ok() {
                     // Use HH/HV pair
@@ -365,6 +367,7 @@ impl SarproGui {
                         pad,
                         autoscale,
                         crate::types::ProcessingOperation::MultibandHhHv,
+                        self.synrgb_mode,
                     )
                 } else {
                     let available = reader.get_available_polarizations();
@@ -490,6 +493,7 @@ impl SarproGui {
         // Spawn background thread for processing
         let target_crs = self.target_crs.clone();
         let resample_alg = self.resample_alg.clone();
+        let synrgb_mode = self.synrgb_mode;
         std::thread::spawn(move || {
             // Always set up tracing subscriber for this thread so error messages appear in GUI
             let subscriber = Registry::default().with(GuiLogLayer::new());
@@ -525,6 +529,7 @@ impl SarproGui {
                 total_memory_mb: 0.0,
                 system_monitor: None,
                 last_system_update: None,
+                synrgb_mode,
             };
             trace!("Background processing thread started");
             let result = twin_gui.process_files_inner();

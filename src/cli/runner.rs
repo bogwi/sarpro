@@ -9,7 +9,7 @@ use sarpro::core::processing::save::{
 };
 use sarpro::io::sentinel1::TargetCrsArg;
 use sarpro::io::SafeReader;
-use sarpro::types::{BitDepth, OutputFormat, ProcessingOperation};
+use sarpro::types::{BitDepth, OutputFormat, ProcessingOperation, SyntheticRgbMode};
 use sarpro::{AutoscaleStrategy, BitDepthArg, InputFormat, Polarization, PolarizationOperation};
 
 use super::args::CliArgs;
@@ -28,6 +28,7 @@ fn process_single_file(
     pad: bool,
     target_crs: Option<&str>,
     resample_alg: Option<&str>,
+    synrgb_mode: SyntheticRgbMode,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let polarization_str = match polarization {
         Polarization::Vv => None,
@@ -169,6 +170,7 @@ fn process_single_file(
                     pad,
                     autoscale,
                     ProcessingOperation::MultibandVvVh,
+                    synrgb_mode,
                 )
             } else if reader.hh_data().is_ok() && reader.hv_data().is_ok() {
                 let hh_processed = reader.hh_data()?;
@@ -192,6 +194,7 @@ fn process_single_file(
                     pad,
                     autoscale,
                     ProcessingOperation::MultibandHhHv,
+                    synrgb_mode,
                 )
             } else {
                 let available = reader.get_available_polarizations();
@@ -319,6 +322,7 @@ pub fn run(args: CliArgs) -> Result<(), Box<dyn std::error::Error>> {
                     args.pad,
                     args.target_crs.as_deref(),
                     args.resample_alg.as_deref(),
+                    args.synrgb_mode,
                 ) {
                     Ok(()) => {
                         info!("Successfully processed: {:?}\n", path);
@@ -360,6 +364,7 @@ pub fn run(args: CliArgs) -> Result<(), Box<dyn std::error::Error>> {
             args.pad,
             args.target_crs.as_deref(),
             args.resample_alg.as_deref(),
+            args.synrgb_mode,
         )?;
         info!("Successfully processed: {:?} -> {:?}\n", input, output);
     }
