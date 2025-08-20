@@ -11,7 +11,7 @@ use crate::core::processing::resize::resize_image_data;
 use crate::core::processing::save::{
     save_processed_image, save_processed_multiband_image_sequential,
 };
-use crate::core::processing::synthetic_rgb::create_synthetic_rgb_by_mode;
+use crate::core::processing::synthetic_rgb::create_synthetic_rgb_by_mode_and_strategy;
 use crate::error::{Error, Result};
 use crate::io::sentinel1::{TargetCrsArg, SafeMetadata, SafeReader};
 use crate::types::{
@@ -225,7 +225,12 @@ pub fn process_safe_to_buffer(
                 resize_image_data(&s2_u8, None, cols, rows, target_size, BitDepth::U8, pad)
                     .map_err(|e| Error::external(e))?;
 
-            let rgb = create_synthetic_rgb_by_mode(SyntheticRgbMode::Default, &final1_u8, &final2_u8);
+            let rgb = create_synthetic_rgb_by_mode_and_strategy(
+                SyntheticRgbMode::Default,
+                autoscale,
+                &final1_u8,
+                &final2_u8,
+            );
 
             Ok(ProcessedImage {
                 width: final_cols,
@@ -411,7 +416,12 @@ pub fn process_safe_to_buffer_with_mode(
                 resize_image_data(&s2_u8, None, cols, rows, target_size, BitDepth::U8, pad)
                     .map_err(|e| Error::external(e))?;
 
-            let rgb = create_synthetic_rgb_by_mode(synrgb_mode, &final1_u8, &final2_u8);
+            let rgb = create_synthetic_rgb_by_mode_and_strategy(
+                synrgb_mode,
+                autoscale,
+                &final1_u8,
+                &final2_u8,
+            );
 
             Ok(ProcessedImage {
                 width: final_cols,

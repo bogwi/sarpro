@@ -5,7 +5,7 @@ use tracing::info;
 use crate::core::processing::pipeline::process_scalar_data_pipeline;
 use crate::core::processing::autoscale::autoscale_db_image_tamed_synrgb_u8;
 use crate::core::processing::resize::resize_image_data_with_meta;
-use crate::core::processing::synthetic_rgb::create_synthetic_rgb_by_mode;
+use crate::core::processing::synthetic_rgb::create_synthetic_rgb_by_mode_and_strategy;
 use crate::io::writers::jpeg::{write_gray_jpeg, write_rgb_jpeg};
 use crate::io::writers::metadata::{
     create_jpeg_metadata_sidecar_with_overrides, create_jpeg_metadata_sidecar_with_overrides_and_extras, embed_tiff_metadata,
@@ -360,7 +360,12 @@ pub fn save_processed_multiband_image_sequential(
                 pad,
             )?;
 
-            let rgb_data = create_synthetic_rgb_by_mode(syn_mode, &final_u8_band1, &final_u8_band2);
+            let rgb_data = create_synthetic_rgb_by_mode_and_strategy(
+                syn_mode,
+                strategy,
+                &final_u8_band1,
+                &final_u8_band2,
+            );
 
             write_rgb_jpeg(output, final_cols, final_rows, &rgb_data)?;
 

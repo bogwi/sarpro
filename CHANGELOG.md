@@ -1,5 +1,29 @@
 ### Changelog
 
+### [0.2.14] - 2025-08-19 (Unpublished)
+
+- **Added**:
+  - Maritime suppression for multiband synthetic RGB JPEGs when autoscale is Tamed or CLAHE.
+    - New helper `create_synthetic_rgb_suppressed(band1, band2)` in `core/processing/synthetic_rgb.rs`:
+      - Estimates a global low floor (~p05) from the combined U8 histograms of both bands.
+      - Forces pixels where both bands are below floor+cushion to black (suppresses water texture).
+      - Applies soft floor subtraction with slightly >1 gamma to compress lows (reduces water sparkle).
+      - Stabilizes blue ratio with epsilon and lowers blue gain for calmer sea tones.
+    - New dispatcher `create_synthetic_rgb_by_mode_and_strategy(mode, strategy, b1, b2)` routes to the suppressed mapping for `Tamed` and `Clahe`; otherwise uses the existing default mapping.
+    - Wiring:
+      - `save.rs` (multiband JPEG path) and `api/mod.rs` now call the new dispatcher, passing the active autoscale strategy.
+
+- **Changed**:
+  - Visual behavior for multiband JPEG quicklooks under `Tamed`/`Clahe`: with some maritime reduced (sea/water) without affecting land targets. From version 0.3.x improving the quality of generated synthetic RGB will tackled with more rigour and sophistication.
+  - No changes to TIFF outputs (single or multiband) and no changes to other autoscale strategies.
+
+- **Performance**:
+  - Negligible overhead: small 256-bin histogram and LUTs; synRGB stage remains memory-bound.
+
+- **Compatibility**:
+  - API: additive only (new functions), existing call sites remain valid.
+  - Defaults: Only multiband JPEG with `Tamed`/`Clahe` are visually adjusted; other modes/strategies unchanged.
+
 ### [0.2.13] - 2025-08-19 (Unpublished)
 
 - **Added**:

@@ -31,7 +31,7 @@ use std::path::Path;
 use sarpro::{
     process_safe_to_path,
     ProcessingParams,
-    AutoscaleStrategy, BitDepthArg, OutputFormat, Polarization, InputFormat,
+    AutoscaleStrategy, BitDepthArg, OutputFormat, Polarization, InputFormat, SyntheticRgbMode,
 };
 
 fn main() -> sarpro::Result<()> {
@@ -43,6 +43,7 @@ fn main() -> sarpro::Result<()> {
         autoscale: AutoscaleStrategy::Clahe,
         target_crs: Some("EPSG:32630".to_string()),
         resample_alg: Some("lanczos".to_string()),
+        synrgb_mode: SyntheticRgbMode::Default,
         size: Some(2048),
         pad: true,
     };
@@ -61,7 +62,7 @@ Process in-memory to `ProcessedImage`
 use std::path::Path;
 use sarpro::{
     process_safe_to_buffer,
-    AutoscaleStrategy, BitDepth, OutputFormat, Polarization,
+    AutoscaleStrategy, BitDepth, OutputFormat, Polarization
 };
 
 fn main() -> sarpro::Result<()> {
@@ -127,7 +128,7 @@ Batch helpers
 use std::path::Path;
 use sarpro::{
     process_directory_to_path,
-    ProcessingParams, AutoscaleStrategy, BitDepthArg, OutputFormat, Polarization, InputFormat,
+    ProcessingParams, AutoscaleStrategy, BitDepthArg, OutputFormat, Polarization, InputFormat, SyntheticRgbMode,
 };
 
 fn main() -> sarpro::Result<()> {
@@ -139,6 +140,7 @@ fn main() -> sarpro::Result<()> {
         autoscale: AutoscaleStrategy::Clahe,
         target_crs: Some("EPSG:32630".to_string()),
         resample_alg: Some("lanczos".to_string()),
+        synrgb_mode: SyntheticRgbMode::Default,
         size: Some(1024),
         pad: true,
     };
@@ -162,7 +164,7 @@ cases, e.g. GDAL or SAFE reader errors.
 
 ```rust,no_run
 use std::path::Path;
-use sarpro::{process_safe_to_path, Error, ProcessingParams, AutoscaleStrategy, BitDepthArg, OutputFormat, Polarization, InputFormat};
+use sarpro::{process_safe_to_path, Error, ProcessingParams, AutoscaleStrategy, BitDepthArg, OutputFormat, Polarization, InputFormat, SyntheticRgbMode};
 
 fn main() {
     let params = ProcessingParams {
@@ -173,6 +175,7 @@ fn main() {
         autoscale: AutoscaleStrategy::Clahe,
         target_crs: Some("EPSG:32630".to_string()),
         resample_alg: Some("lanczos".to_string()),
+        synrgb_mode: SyntheticRgbMode::Default,
         size: None,
         pad: false,
     };
@@ -215,7 +218,7 @@ pub mod gui;
 pub use core::params::ProcessingParams;
 pub use error::{Error, Result};
 pub use types::{
-    AutoscaleStrategy, BitDepth, BitDepthArg, InputFormat, OutputFormat, Polarization,
+    AutoscaleStrategy, BitDepth, BitDepthArg, InputFormat, OutputFormat, Polarization, SyntheticRgbMode,
     PolarizationOperation, ProcessingOperation,
 };
 
