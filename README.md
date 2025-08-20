@@ -79,8 +79,8 @@ Instrument short name: SAR
 
 
 #### Layer Separation in synthetic RGB
-Sapro provides great layer separation in synthetic RGB JPEGs even in the most complex scenes and extreme zoom. This is a handcrafter Default preset with new CLAHE autoscale strategy. Notice the speckles are non intrusive and we have no  filtering at all! *Note: Speckl wilters will come later in v0.3.x and will be optional of course to maximize the quality of the synthetic RGB and harness the performance of the workstation machine.*
-![Layer Separation in synthetic RGB](src/assets/SAPRO_mosaic_layer_separation.jpg)
+SARPRO delivers excellent layer separation in synthetic RGB JPEGs, even in highly complex scenes and at extreme zoom levels. The example shown uses the handcrafted Default preset with the new CLAHE autoscale strategy. Speckle is minimal and unobtrusive, despite no speckle filtering being applied. *Speckle filtering will be introduced as an optional feature in v0.3.x to further enhance synthetic RGB quality and leverage workstation performance as needed.*
+![Layer Separation in synthetic RGB](src/assets/sarpro_mosaic_layer_separation.jpg)
 
 
 ### Recommended Workflows
