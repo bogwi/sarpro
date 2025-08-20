@@ -35,7 +35,7 @@ impl Default for ProcessingParams {
             size: None,
             pad: false,
             target_crs: None,
-            resample_alg: Some("bilinear".to_string()),
+            resample_alg: Some("lanczos".to_string()),
         }
     }
 }

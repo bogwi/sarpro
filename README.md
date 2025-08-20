@@ -5,7 +5,7 @@ A high-performance Sentinel-1 Synthetic Aperture Radar (SAR) GRD product to imag
 ## Features
 - **Sentinel-1 Support**: Specialized for Sentinel-1 SAR GRD products
 - **Multiple Interfaces**: CLI, GUI, and library APIs
-- **Blazing Fast Performance**: Process dual-band 400MP GRD product images and scale to 4MP (2048x2048) synthetic RGB JPEG with reprojection and padding in just **~1.5 seconds** on modern laptops (since v0.2.1, see [CHANGELOG](CHANGELOG.md) for performance details) **THIS IS NOT A TYPO**
+- **Blazing Fast Performance**: Process dual-band 400MP GRD product images and scale to 4MP (2048x2048) synthetic RGB JPEG with reprojection and padding in just **~1.5 seconds** on modern laptops (since v0.2.1, see [CHANGELOG](CHANGELOG.md) for performance details)
 - **Flexible Polarization**: Support for VV, VH, HH, HV, multiband, and polarization operations (sum, difference, ratio, etc.)
 - **Advanced Autoscaling**: Multiple strategies including standard, robust, adaptive, and equalized
 - **Batch Processing**: Process multiple SAFE directories efficiently for ML workflows
@@ -13,7 +13,7 @@ A high-performance Sentinel-1 Synthetic Aperture Radar (SAR) GRD product to imag
 - **Memory Efficient**: Optimized for processing large SAR datasets
 - **I/O Optimized**: Performance typically limited by disk I/O, not CPU processing
 - **since v0.2.0**: Can now reproject to any CRS and resample with nearest, bilinear, cubic, or lanczos algorithms
-- **since v0.3.0**: Can now automatically detect the target CRS from the product metadata and use it for reprojection.
+- **since v0.3.0**: Can now automatically detect the target CRS from the product metadata and use it for reprojection. Also new benefit from the new CLAHE autoscale strategy which provides great layer separation in synthetic RGB JPEGs.
 
 ## ROADMAP and ROADMAP_explained
 See [ROADMAP.md](ROADMAP.md) for the high‑level phases and upcoming features. See [ROADMAP_explained.md](ROADMAP_explained.md) for the detailed technical explanation. This highlights what’s coming (COG/STAC, masking, speckle filters, DEM‑based RTC, tiling, time‑series) and expected release groupings.
@@ -41,7 +41,7 @@ Visit [CHANGELOG.md](CHANGELOG.md) to track the changes.
 - **Use a GUI for local, interactive runs**: Select SAFE folders, tweak parameters, monitor progress, and auto‑generate equivalent CLI commands.
 - **Integrate as a Rust library**: Call the typed API to get in‑memory buffers or write outputs directly from your application, reusing SARPRO’s autoscaling and writers.
 
-Where SARPRO v0.2.4 fits today (GRD):
+Where SARPRO v0.3.0 fits today (GRD):
 - **Exploratory analysis and visualization**: Rapidly turn SAFE into publication‑quality figures and synRGB quicklooks for urban, agriculture, water, and disaster contexts.
 - **Internal data catalogs**: Generate standardized JPEG quicklooks and GeoTIFFs with consistent sizing for fast browsing and indexing.
 - **ML dataset preparation**: Create reproducible grayscale or multiband inputs with fixed sizes/padding, ready for training/evaluation.
@@ -76,6 +76,12 @@ Instrument short name: SAR
 ```
 
 ![Mount Fuji crop example](src/assets/S1A_IW_GRDH_1SDV_20250706T204346_20250706T204411_059968_07730F_F70D.SAFE_mt.Fuji.jpg)
+
+
+#### Layer Separation in synthetic RGB
+Sapro provides great layer separation in synthetic RGB JPEGs even in the most complex scenes and extreme zoom. This is a handcrafter Default preset with new CLAHE autoscale strategy. Notice the speckles are non intrusive and we have no  filtering at all! *Note: Speckl wilters will come later in v0.3.x and will be optional of course to maximize the quality of the synthetic RGB and harness the performance of the workstation machine.*
+![Layer Separation in synthetic RGB](src/assets/SAPRO_mosaic_layer_separation.jpg)
+
 
 ### Recommended Workflows
 
@@ -191,7 +197,7 @@ The CLI provides powerful batch processing capabilities for SAR imagery, optimiz
 ```bash
 
 # Batch process a directory
-cargo run --release --bin sarpro -- --input-dir /path/to/safe/directories --output-dir /path/to/output --batch --log --format jpeg --polarization multiband --size 1024 --autoscale tamed --target-crs EPSG:32630 --resample-alg bilinear
+cargo run --release --bin sarpro -- --input-dir /path/to/safe/directories --output-dir /path/to/output --batch --log --format jpeg --polarization multiband --size 1024 --autoscale tamed --target-crs auto --resample-alg lanczos --synrgb-mode default
 
 # Process a .SAFE file with specific parameters
 cargo run --release --bin sarpro -- -i data.SAFE -o output.tiff \
@@ -200,8 +206,8 @@ cargo run --release --bin sarpro -- -i data.SAFE -o output.tiff \
     --bit-depth u16 \
     --size 1024 \
     --autoscale tamed \
-    --target-crs EPSG:32630 \
-    --resample-alg bilinear \
+    --target-crs auto \
+    --resample-alg lanczos \
     --log
 ```
 
@@ -214,14 +220,15 @@ cargo run --release --bin sarpro -- -i data.SAFE -o output.tiff \
 - `--format, -f`: Output format (`tiff` or `jpeg`)
 - `--bit-depth`: Output bit depth (`8` or `16`)
 - `--polarization`: Polarization mode (`vv`, `vh`, `hh`, `hv`, `multiband`, `sum`, `diff`, `ratio`, `n-diff`, `log-ratio`)
-- `--autoscale`: Autoscaling strategy (`standard`, `robust`, `adaptive`, `equalized`, `tamed`, `default`)
+- `--autoscale`: Autoscaling strategy (`standard`, `robust`, `adaptive`, `equalized`, `tamed`, `default`, `clahe`)
+- `--synrgb-mode`: Synthetic RGB mode, for JPEG outputs (`default`, `rgb-ratio`, `sar-urban`, `enhanced`)
 - `--size`: Output image size (predefined: 512, 1024, 2048, or custom number, or `original`)
 - `--pad`: Add padding to make square images
 - `--batch`: Enable batch mode with error resilience
 - `--log`: Enable detailed logging
 
 - `--target-crs`: Optional target CRS for map reprojection (e.g., `EPSG:4326`, `EPSG:32633`). Special values: `auto` (detect UTM zone from metadata), `none` (disable reprojection)
-- `--resample-alg`: Resampling algorithm for reprojection (`nearest`, `bilinear`, `cubic`) — default: `bilinear`
+- `--resample-alg`: Resampling algorithm for reprojection (`nearest`, `bilinear`, `cubic`, `lanczos`) — default: `lanczos`
 
 ### Graphical User Interface (GUI)
 
@@ -250,7 +257,7 @@ The GUI is ideal for local work and provides:
 
 The GUI is the easiest way to get started with SARPRO locally.
 
-![SARPRO GUI](src/assets/sarprogui.png)
+![SARPRO GUI](src/assets/sarprogui03x.png)
 
 #### Render example of Sentinel-1 SAR GRD product downloaded from [dataspace.copernicus.eu](https://dataspace.copernicus.eu/). The 25192 × 19614px (~500MP) reprojected, dual-band image scaled and padded to 3024px on the long side and carrying metadata took just ~2 seconds on Apple M4Pro12 with minimal CPU usage. (see [CHANGELOG](CHANGELOG.md) from v0.2.1 for performance details). Warping it at 25192 × 19614px, and autocaling, padding and into synthetic RGB JPEG takes around 70 seconds.
 ```Summary
@@ -282,7 +289,7 @@ Note on stability: the public API is experimental in initial releases. Expect in
 
 ```toml
 [dependencies]
-sarpro = { version = "0.1", features = ["full"] }
+sarpro = { version = "0.3", features = ["full"] }
 ```
 
 #### High-level processing to a file
@@ -293,22 +300,27 @@ use sarpro::{
     api::process_safe_to_path,
     ProcessingParams,
     AutoscaleStrategy, BitDepthArg, OutputFormat, Polarization,
+    InputFormat, SyntheticRgbMode
 };
 
 let params = ProcessingParams {
-    format: OutputFormat::TIFF,
-    bit_depth: BitDepthArg::U16,
-    polarization: Polarization::Multiband,
-    autoscale: AutoscaleStrategy::Tamed,
-    size: Some(2048),
-    pad: true,
-};
+        format: OutputFormat::TIFF,
+        input_format: InputFormat::Safe,
+        bit_depth: BitDepthArg::U16,
+        polarization: Polarization::Multiband,
+        autoscale: AutoscaleStrategy::Clahe,
+        target_crs: Some("auto".to_string()),
+        resample_alg: Some("lanczos".to_string()),
+        synrgb_mode: SyntheticRgbMode::Default,
+        size: Some(2048),
+        pad: true,
+    };
 
-process_safe_to_path(
-    Path::new("/data/S1A_xxx.SAFE"),
-    Path::new("/out/product.tiff"),
-    &params,
-)?;
+    process_safe_to_path(
+        Path::new("/data/S1A_example.SAFE"),
+        Path::new("/out/product.tiff"),
+        &params,
+    )?;
 ```
 
 #### In-memory processing to raw buffers
@@ -316,11 +328,11 @@ process_safe_to_path(
 ```rust
 use std::path::Path;
 use sarpro::{
-    api::process_safe_to_buffer,
-    AutoscaleStrategy, BitDepth, OutputFormat, Polarization,
+    api::process_safe_to_buffer_with_mode,
+    AutoscaleStrategy, BitDepth, OutputFormat, Polarization, SyntheticRgbMode,
 };
 
-let img = process_safe_to_buffer(
+let img = process_safe_to_buffer_with_mode(
     Path::new("/data/S1A_xxx.SAFE"),
     Polarization::Multiband,
     AutoscaleStrategy::Tamed,
@@ -328,6 +340,7 @@ let img = process_safe_to_buffer(
     Some(1024),              // Resize target
     true,                    // Pad to square
     OutputFormat::JPEG,      // JPEG for synthetic RGB; TIFF for grayscale/multiband
+    SyntheticRgbMode::Default,
 )?;
 
 match (img.format, img.bit_depth) {
@@ -349,32 +362,31 @@ match (img.format, img.bit_depth) {
 }
 ```
 
-#### Typed save helpers (when you have complex arrays already)
+#### Typed save helpers (when you already have processed intensity arrays)
 
 ```rust
 use std::path::Path;
 use ndarray::Array2;
-use num_complex::Complex;
 use sarpro::{
     api::{save_image, save_multiband_image},
     AutoscaleStrategy, BitDepth, OutputFormat, ProcessingOperation,
 };
 
-fn save_single(processed: &Array2<Complex<f64>>) -> sarpro::Result<()> {
+fn save_single(processed: &Array2<f32>) -> sarpro::Result<()> {
     save_image(
         processed,
         Path::new("/out/single.tiff"),
         OutputFormat::TIFF,
         BitDepth::U16,
         Some(2048),
-        None,                  // Optional SAFE metadata if available
+        None, // Optional SAFE metadata if available
         true,
         AutoscaleStrategy::Tamed,
         ProcessingOperation::SingleBand,
     )
 }
 
-fn save_dual(vv: &Array2<Complex<f64>>, vh: &Array2<Complex<f64>>) -> sarpro::Result<()> {
+fn save_dual(vv: &Array2<f32>, vh: &Array2<f32>) -> sarpro::Result<()> {
     save_multiband_image(
         vv,
         vh,
@@ -394,15 +406,22 @@ fn save_dual(vv: &Array2<Complex<f64>>, vh: &Array2<Complex<f64>>) -> sarpro::Re
 
 ```rust
 use std::path::Path;
-use sarpro::{api::{iterate_safe_products, process_directory_to_path}, ProcessingParams, AutoscaleStrategy, BitDepthArg, OutputFormat, Polarization};
+use sarpro::{
+    api::process_directory_to_path,
+    ProcessingParams, AutoscaleStrategy, BitDepthArg, OutputFormat, Polarization, InputFormat, SyntheticRgbMode,
+};
 
 let params = ProcessingParams {
     format: OutputFormat::JPEG,
+    input_format: InputFormat::Safe,
     bit_depth: BitDepthArg::U8,
     polarization: Polarization::Multiband,
     autoscale: AutoscaleStrategy::Tamed,
+    synrgb_mode: SyntheticRgbMode::Default,
     size: Some(1024),
     pad: true,
+    target_crs: Some("auto".to_string()),
+    resample_alg: Some("lanczos".to_string()),
 };
 
 let report = process_directory_to_path(
@@ -444,19 +463,20 @@ flowchart TB
   A["Input: Sentinel-1 SAFE (GRD)"] --> B["Parse manifest.safe + annotation XMLs\nExtract product & georef metadata"]
   A --> C["Identify polarization measurement TIFFs (VV/VH/HH/HV)"]
   C --> D["Read TIFF via GDAL\narray + geotransform + projection/GCP"]
-  D --> E{"Target CRS specified?"}
-  E -- "Yes" --> F["Warp with gdalwarp to target CRS\n-r nearest/bilinear/cubic\nIf no SRS: use GCP + -tps"]
-  E -- "No" --> G["Use native georeferencing"]
+  D --> E{"Target CRS"}
+  E -- "none" --> G["Use native georeferencing"]
+  E -- "auto" --> Ea["Resolve UTM/UPS from metadata/GCPs\n(e.g., EPSG:326xx/327xx)"] --> F["Warp with gdalwarp to target CRS\n-r nearest/bilinear/cubic/lanczos\nIf no SRS: use GCP + -tps"]
+  E -- "custom EPSG" --> F
   F --> H["Optional polarization ops\nsum/diff/ratio/n-diff/log-ratio or pair for synRGB"]
   G --> H
   H --> I["Convert magnitude to dB\n10·log10(|x|) and mask invalid"]
-  I --> J["Autoscale to U8/U16 using strategy\nstandard/robust/adaptive/equalized/tamed"]
+  I --> J["Autoscale to U8/U16 using strategy\nstandard/robust/adaptive/equalized/tamed/clahe"]
   J --> K["Optional resize (long side)"]
   K --> L["Optional pad to square"]
   L --> M{"Output format"}
   M -- "TIFF (u8/u16)" --> N["Write GeoTIFF bands"]
   N --> O["Embed metadata (geotransform/projection + attributes)"]
-  M -- "JPEG (gray/synRGB)" --> P["Write JPEG"]
+  M -- "JPEG (gray/synRGB)" --> P["Write JPEG (gray or synthetic RGB)\nmode: default/rgb-ratio/sar-urban/enhanced"]
   P --> Q["Sidecars: .json (metadata), .jgw/.wld, .prj"]
 ```
 

@@ -484,11 +484,26 @@ pub fn process_directory_to_path(
     let mut iter = iterate_safe_products(input_dir)?;
     while let Some(path) = iter.next() {
         // Early viability check to allow skipping unsupported product types
+        // Map target CRS and resample algorithm similarly to single-file path
+        let target_arg: Option<TargetCrsArg> = match params.target_crs.as_deref() {
+            Some(t) if t.eq_ignore_ascii_case("none") => Some(TargetCrsArg::None),
+            Some(t) if t.eq_ignore_ascii_case("auto") => Some(TargetCrsArg::Auto),
+            Some(t) => Some(TargetCrsArg::Custom(t.to_string())),
+            None => None,
+        };
+        let resample_alg = match params.resample_alg.as_deref() {
+            Some("nearest") => Some(gdal::raster::ResampleAlg::NearestNeighbour),
+            Some("bilinear") => Some(gdal::raster::ResampleAlg::Bilinear),
+            Some("cubic") => Some(gdal::raster::ResampleAlg::Cubic),
+            Some("lanczos") | None => Some(gdal::raster::ResampleAlg::Lanczos),
+            Some(_) => Some(gdal::raster::ResampleAlg::Lanczos),
+        };
+
         match SafeReader::open_with_warnings_with_options(
             &path,
             pol_to_reader_hint(&params.polarization),
-            None,
-            None,
+            target_arg,
+            resample_alg,
             params.size,
         )? {
             Some(_) => {
@@ -535,9 +550,10 @@ pub fn process_safe_to_path(input: &Path, output: &Path, params: &ProcessingPara
 
     let resample_alg = match params.resample_alg.as_deref() {
         Some("nearest") => Some(gdal::raster::ResampleAlg::NearestNeighbour),
+        Some("bilinear") => Some(gdal::raster::ResampleAlg::Bilinear),
         Some("cubic") => Some(gdal::raster::ResampleAlg::Cubic),
-        Some("lanczos") => Some(gdal::raster::ResampleAlg::Lanczos),
-        _ => Some(gdal::raster::ResampleAlg::Bilinear),
+        Some("lanczos") | None => Some(gdal::raster::ResampleAlg::Lanczos),
+        Some(_) => Some(gdal::raster::ResampleAlg::Lanczos),
     };
 
     let reader = SafeReader::open_with_options(
@@ -839,7 +855,7 @@ pub fn save_multiband_image(
     .map_err(|e| Error::external(e))
 }
 
-/// Load a single polarization's complex array and metadata
+/// Load a single polarization's processed intensity array (`Array2<f32>`) and metadata
 pub fn load_polarization(
     input: &Path,
     pol: Polarization,
@@ -864,7 +880,7 @@ pub fn load_polarization(
     Ok((data_ref.clone(), reader.metadata.clone()))
 }
 
-/// Compute an operation (sum/diff/ratio/...) over an available pair and return array + metadata
+/// Compute an operation (sum/diff/ratio/...) over an available pair and return intensity array + metadata
 pub fn load_operation(
     input: &Path,
     op: PolarizationOperation,

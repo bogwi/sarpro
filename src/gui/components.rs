@@ -280,7 +280,7 @@ impl FormatOptionsComponent {
                 },
                 Polarization::Multiband => {
                     if app.output_format == OutputFormat::JPEG {
-                        "Multiband (synthetic RGB). Choose mode in the dropdown below. Default uses R=VV|HH, G=VH|HV, B=ratio with gamma/LUTs. Use Tamed or CLAHE for contrast."
+                        "Multiband (synthetic RGB). Choose mode in the dropdown below. Default uses R=VV|HH, G=VH|HV, B=ratio with gamma/LUTs. Use Tamed or CLAHE for contrast. *Note: All use Default at the moment, to be implemented in v0.3.x"
                     } else {
                         "Multiband. The output is grayscale. Use with Tamed or Clahe autoscale strategy to isolate the ground from the water."
                     }

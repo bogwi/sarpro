@@ -21,7 +21,7 @@ Add dependency
 --------------
 ```toml
 [dependencies]
-sarpro = { version = "0.1", features = ["full"] }
+sarpro = { version = "0.3", features = ["full"] }
 ```
 
 Quick start: process a SAFE to a file
@@ -41,7 +41,7 @@ fn main() -> sarpro::Result<()> {
         bit_depth: BitDepthArg::U16,
         polarization: Polarization::Multiband,
         autoscale: AutoscaleStrategy::Clahe,
-        target_crs: Some("EPSG:32630".to_string()),
+        target_crs: Some("auto".to_string()),
         resample_alg: Some("lanczos".to_string()),
         synrgb_mode: SyntheticRgbMode::Default,
         size: Some(2048),
@@ -61,12 +61,12 @@ Process in-memory to `ProcessedImage`
 ```rust,no_run
 use std::path::Path;
 use sarpro::{
-    process_safe_to_buffer,
-    AutoscaleStrategy, BitDepth, OutputFormat, Polarization
+    process_safe_to_buffer_with_mode,
+    AutoscaleStrategy, BitDepth, OutputFormat, Polarization, SyntheticRgbMode
 };
 
 fn main() -> sarpro::Result<()> {
-    let img = process_safe_to_buffer(
+    let img = process_safe_to_buffer_with_mode(
         Path::new("/data/S1A_example.SAFE"),
         Polarization::Multiband,
         AutoscaleStrategy::Clahe,
@@ -74,6 +74,7 @@ fn main() -> sarpro::Result<()> {
         Some(1024),
         true,
         OutputFormat::JPEG,
+        SyntheticRgbMode::Default,
     )?;
 
     // Use `img` buffers in your pipeline (TIFF grayscale/multiband or synthetic RGB JPEG)
@@ -138,7 +139,7 @@ fn main() -> sarpro::Result<()> {
         bit_depth: BitDepthArg::U8,
         polarization: Polarization::Multiband,
         autoscale: AutoscaleStrategy::Clahe,
-        target_crs: Some("EPSG:32630".to_string()),
+        target_crs: Some("auto".to_string()),
         resample_alg: Some("lanczos".to_string()),
         synrgb_mode: SyntheticRgbMode::Default,
         size: Some(1024),
@@ -234,6 +235,6 @@ pub use io::writers::metadata::{
 // High-level API re-exports
 pub use api::{
     BatchReport, ProcessedImage, iterate_safe_products, load_operation, load_polarization,
-    process_directory_to_path, process_safe_to_buffer, process_safe_to_path,
-    process_safe_with_options, save_image, save_multiband_image,
+    process_directory_to_path, process_safe_to_buffer, process_safe_to_buffer_with_mode,
+    process_safe_to_path, process_safe_with_options, save_image, save_multiband_image,
 };

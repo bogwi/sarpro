@@ -1,5 +1,33 @@
 ### Changelog
 
+
+### [0.3.0] - 2025-08-20 (released)
+
+- **Overview**:
+  - First consolidated, public milestone that rolls up the 0.2.x optimization work and plumbing into a clean API/CLI/GUI surface. This release aligns defaults and behavior, opening the way for the Roadmap phases (COG/STAC, masking, speckle filters, RTC, tiling, and time‑series) to land with minimal refactors.
+
+- **Highlights**:
+  - New autoscale strategy: CLAHE for superior local contrast, especially in synRGB quicklooks.
+  - Synthetic RGB orchestration with explicit `SyntheticRgbMode`, plumbing in CLI/GUI/API.
+  - Optional maritime suppression for synRGB under `Tamed`/`Clahe` (multiband JPEG only).
+  - Auto target CRS selection (`--target-crs auto`) resolved once per SAFE and reused.
+  - Faster pipeline end‑to‑end via LUTs, fewer clones, f32 intensities, and streaming histograms.
+  - Reprojection uses VRTs and single‑pass size selection to reduce I/O and temp files.
+
+- **API and defaults**:
+  - Default resampling is now Lanczos; CLI/GUI/API accept `nearest|bilinear|cubic|lanczos`.
+  - `ProcessingParams` includes `target_crs`, `resample_alg`, and `synrgb_mode`.
+  - In‑memory API adds `process_safe_to_buffer_with_mode(...)` for synRGB mode selection.
+  - Batch processing now respects reprojection and resampling options consistently.
+  - Public types and save helpers operate on `Array2<f32>` intensities (no complex types) for GRD.
+
+- **Docs**:
+  - README “As a Library” updated: dependency `0.3`, correct examples, Lanczos defaults, f32 arrays.
+  - Crate docs synced to new defaults and in‑memory function.
+
+- **Roadmap readiness**:
+  - With stable plumbing for CRS/resampling, typed params, and a faster memory profile, 0.3.0 is the base for Phase 1–2 work (COG/STAC, QC sidecars, remote I/O). Subsequent releases will focus on masking quality, speckle filters, RTC normalization, and tiling/time‑series as described in `ROADMAP.md`.
+
 ### [0.2.14] - 2025-08-19 (Unpublished)
 
 - **Added**:
