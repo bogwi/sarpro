@@ -186,6 +186,25 @@ cargo install sarpro --features gui --bin sarproUI
 
 Note: Installing the GUI requires the GDAL runtime and GUI dependencies to be available on your system.
 
+### Build profiles
+
+- **Default release (recommended for most users)**: Uses Cargo’s standard release settings with lightweight debug info (`debug=1`) and `panic=abort` for useful backtraces. Fast to compile; suitable for `cargo install` and typical Linux/Windows source installs.
+- **Opt‑in LTO (maximum size squeeze)**: A separate `release-lto` profile enables fat LTO and `codegen-units=1`. It produces smaller binaries on many platforms at the cost of significantly longer compile times.
+
+Build examples:
+
+```bash
+# Fast build (default release)
+cargo build --release --features full
+
+# Opt-in fat LTO build
+cargo build --profile release-lto --features full
+```
+
+Notes:
+- The default remains optimized for compile time because SARPRO workloads are typically I/O‑bound.
+- Use the LTO profile for published artifacts or when disk size is a priority.
+
 ## Usage
 
 ### Command Line Interface (CLI)

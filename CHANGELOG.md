@@ -1,6 +1,12 @@
 ### Changelog
 
 
+### [0.3.1] - 2025-08-21 (unreleased)
+
+- **Docs**:
+  - README: Added "Build profiles" section documenting default release vs opt‑in `release-lto`, with build commands and rationale (I/O‑bound workloads; size vs compile-time tradeoff).
+  - Clarified project policy: keep default release fast for broad source installs; provide opt‑in fat LTO profile for published binaries and users prioritizing size.
+
 ### [0.3.0] - 2025-08-20 (released)
 
 - **Overview**:
