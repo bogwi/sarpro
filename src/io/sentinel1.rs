@@ -8,12 +8,13 @@ use thiserror::Error;
 use tracing::info;
 use tracing::warn;
 
-use crate::io::gdal::GdalSarReader;
+use crate::io::gdal::{GdalSarReader, to_gdal_path};
 use gdal::Dataset;
 use gdal::raster::Buffer;
 use gdal::raster::ResampleAlg;
 use std::process::Command;
 use serde_json::Value;
+use gdal::vsi;
 
 /// Errors encountered when reading SAFE archives
 #[derive(Debug, Error)]
@@ -122,6 +123,327 @@ pub struct SafeReader {
 }
 
 impl SafeReader {
+    /// Open explicit measurement URLs/paths (VV/VH/HH/HV) without a SAFE folder.
+    /// Minimal metadata is constructed from datasets; product_type is set to GRD.
+    pub fn open_from_measurements(
+        vv: Option<&str>,
+        vh: Option<&str>,
+        hh: Option<&str>,
+        hv: Option<&str>,
+        target_crs: Option<TargetCrsArg>,
+        resample_alg: Option<ResampleAlg>,
+        target_size: Option<usize>,
+    ) -> Result<Self, SafeError> {
+        let mut meta = SafeMetadata {
+            instrument: String::new(),
+            platform: String::new(),
+            acquisition_start: String::new(),
+            acquisition_stop: String::new(),
+            orbit_number: 0,
+            polarizations: Vec::new(),
+            lines: 0,
+            samples: 0,
+            product_type: "GRD".to_string(),
+            range_sampling_rate: None,
+            radar_frequency: None,
+            prf: None,
+            tx_pulse_length: None,
+            tx_pulse_ramp_rate: None,
+            velocity: None,
+            slant_range_near: None,
+            geotransform: None,
+            projection: None,
+            crs: None,
+            pixel_spacing_range: None,
+            pixel_spacing_azimuth: None,
+            instrument_mode: None,
+            pass_direction: None,
+            data_take_id: None,
+            product_id: None,
+            processing_level: None,
+            multilook_factor: None,
+            calibration_type: None,
+            noise_estimate: None,
+            processing_center: None,
+            software_version: None,
+            pixel_data_type: None,
+            bits_per_sample: None,
+            sample_format: None,
+            incidence_angle: None,
+            look_angle: None,
+            doppler_centroid: None,
+            radiometric_calibration: None,
+            geometric_calibration: None,
+            conversion_tool: "SARPRO".to_string(),
+            conversion_version: env!("CARGO_PKG_VERSION").to_string(),
+            conversion_timestamp: chrono::Utc::now().to_rfc3339(),
+        };
+
+        // Resolve effective target CRS; support AUTO by probing the first provided dataset
+        let effective_target_crs = match target_crs {
+            Some(TargetCrsArg::Custom(s)) => Some(s),
+            Some(TargetCrsArg::None) => None,
+            Some(TargetCrsArg::Auto) => {
+                // Pick the first provided measurement URL/path as candidate
+                let candidate = vv.or(vh).or(hh).or(hv);
+                candidate
+                    .and_then(|href| resolve_auto_target_crs_from_dataset_path(Path::new(href)))
+            }
+            None => None,
+        };
+
+        let mut reader_vv: Option<Array2<f32>> = None;
+        let mut reader_vh: Option<Array2<f32>> = None;
+        let mut reader_hh: Option<Array2<f32>> = None;
+        let mut reader_hv: Option<Array2<f32>> = None;
+
+        // Helper to load and also update base georef/dims if empty
+        let mut load_and_update = |
+            href: &str,
+            pol_label: &str,
+        | -> Result<Array2<f32>, SafeError> {
+            let p = Path::new(href);
+            let arr = Self::load_polarization_data_with_options(
+                p,
+                &mut meta,
+                effective_target_crs.as_deref(),
+                resample_alg,
+                target_size,
+            )?;
+            if meta.lines == 0 || meta.samples == 0 {
+                meta.lines = arr.nrows();
+                meta.samples = arr.ncols();
+            }
+            meta.polarizations.push(pol_label.to_uppercase());
+            Ok(arr)
+        };
+
+        if let Some(href) = vv { reader_vv = Some(load_and_update(href, "VV")?); }
+        if let Some(href) = vh { reader_vh = Some(load_and_update(href, "VH")?); }
+        if let Some(href) = hh { reader_hh = Some(load_and_update(href, "HH")?); }
+        if let Some(href) = hv { reader_hv = Some(load_and_update(href, "HV")?); }
+
+        if reader_vv.is_none() && reader_vh.is_none() && reader_hh.is_none() && reader_hv.is_none() {
+            return Err(SafeError::MissingField("At least one measurement URL must be provided"));
+        }
+
+        Ok(SafeReader {
+            base_path: PathBuf::from(vv.or(vh).or(hh).or(hv).unwrap_or("remote")),
+            metadata: meta,
+            product_type: ProductType::GRD,
+            vv_data: reader_vv,
+            vh_data: reader_vh,
+            hh_data: reader_hh,
+            hv_data: reader_hv,
+        })
+    }
+
+    /// Open a remote SAFE packaged as a ZIP (URL or local .zip) using VSIZIP/VSICURL.
+    pub fn open_from_safe_zip_url(
+        zip_href: &str,
+        polarization: Option<&str>,
+        target_crs: Option<TargetCrsArg>,
+        resample_alg: Option<ResampleAlg>,
+        target_size: Option<usize>,
+    ) -> Result<Self, SafeError> {
+        // Build VSI base for the ZIP
+        let base_vsi = to_gdal_path(Path::new(zip_href)).into_owned();
+        // Discover top-level SAFE folder inside the ZIP root
+        let root_entries = vsi::read_dir(&base_vsi, false)
+            .map_err(|e| SafeError::Parse(format!("VSIReadDir error: {}", e)))?;
+        let mut safe_root_rel: Option<String> = None;
+        for rel in root_entries.iter() {
+            let name = rel.to_string_lossy();
+            let name_str = name.as_ref();
+            if name_str.ends_with(".SAFE") || name_str.ends_with(".SAFE/") {
+                // Normalize to no trailing slash when joining
+                let trimmed = name_str.trim_end_matches('/');
+                safe_root_rel = Some(trimmed.to_string());
+                break;
+            }
+        }
+        let safe_root_rel = safe_root_rel.ok_or_else(|| SafeError::Parse("No .SAFE root found inside ZIP".to_string()))?;
+        let safe_root = format!("{}/{}", base_vsi, safe_root_rel);
+        let measurement_dir = format!("{}/measurement", safe_root);
+
+        // List measurement directory via VSI (non-recursive)
+        let entries = vsi::read_dir(&measurement_dir, false)
+            .map_err(|e| SafeError::Parse(format!("VSIReadDir error: {}", e)))?;
+
+        let mut vv_path: Option<PathBuf> = None;
+        let mut vh_path: Option<PathBuf> = None;
+        let mut hh_path: Option<PathBuf> = None;
+        let mut hv_path: Option<PathBuf> = None;
+
+        for rel in entries {
+            let name_lc = rel.to_string_lossy().to_lowercase();
+            if !(name_lc.ends_with(".tif") || name_lc.ends_with(".tiff")) {
+                continue;
+            }
+            let full = PathBuf::from(format!("{}/{}", measurement_dir, rel.to_string_lossy()));
+            if name_lc.contains("vv") {
+                vv_path = Some(full.clone());
+                info!("Found VV file: {:?}", full);
+            } else if name_lc.contains("vh") {
+                vh_path = Some(full.clone());
+                info!("Found VH file: {:?}", full);
+            } else if name_lc.contains("hh") {
+                hh_path = Some(full.clone());
+                info!("Found HH file: {:?}", full);
+            } else if name_lc.contains("hv") {
+                hv_path = Some(full.clone());
+                info!("Found HV file: {:?}", full);
+            }
+        }
+
+        // Minimal metadata
+        let mut metadata = SafeMetadata {
+            instrument: String::new(),
+            platform: String::new(),
+            acquisition_start: String::new(),
+            acquisition_stop: String::new(),
+            orbit_number: 0,
+            polarizations: Vec::new(),
+            lines: 0,
+            samples: 0,
+            product_type: "GRD".to_string(),
+            range_sampling_rate: None,
+            radar_frequency: None,
+            prf: None,
+            tx_pulse_length: None,
+            tx_pulse_ramp_rate: None,
+            velocity: None,
+            slant_range_near: None,
+            geotransform: None,
+            projection: None,
+            crs: None,
+            pixel_spacing_range: None,
+            pixel_spacing_azimuth: None,
+            instrument_mode: None,
+            pass_direction: None,
+            data_take_id: None,
+            product_id: None,
+            processing_level: None,
+            multilook_factor: None,
+            calibration_type: None,
+            noise_estimate: None,
+            processing_center: None,
+            software_version: None,
+            pixel_data_type: None,
+            bits_per_sample: None,
+            sample_format: None,
+            incidence_angle: None,
+            look_angle: None,
+            doppler_centroid: None,
+            radiometric_calibration: None,
+            geometric_calibration: None,
+            conversion_tool: "SARPRO".to_string(),
+            conversion_version: env!("CARGO_PKG_VERSION").to_string(),
+            conversion_timestamp: chrono::Utc::now().to_rfc3339(),
+        };
+
+        // Resolve effective target CRS once
+        let effective_target_crs: Option<String> = match target_crs {
+            Some(TargetCrsArg::Custom(s)) => Some(s),
+            Some(TargetCrsArg::None) => None,
+            Some(TargetCrsArg::Auto) => {
+                // Build a candidate measurement path inside the ZIP if present
+                // Prefer VV/VH, else HH/HV, else first TIFF found
+                let mut candidate: Option<PathBuf> = None;
+                let meas_entries = vsi::read_dir(&measurement_dir, false)
+                    .map_err(|e| SafeError::Parse(format!("VSIReadDir error: {}", e)))?;
+                for rel in meas_entries.iter() {
+                    let name = rel.to_string_lossy().to_lowercase();
+                    if name.ends_with(".tif") || name.ends_with(".tiff") {
+                        if candidate.is_none() {
+                            candidate = Some(PathBuf::from(format!("{}/{}", measurement_dir, rel.to_string_lossy())));
+                        }
+                        if name.contains("vv") || name.contains("vh") || name.contains("hh") || name.contains("hv") {
+                            candidate = Some(PathBuf::from(format!("{}/{}", measurement_dir, rel.to_string_lossy())));
+                            if name.contains("vv") || name.contains("vh") { break; }
+                        }
+                    }
+                }
+                candidate
+                    .as_ref()
+                    .and_then(|p| resolve_auto_target_crs_from_dataset_path(p))
+            }
+            None => None,
+        };
+
+        let mut vv_data = None;
+        let mut vh_data = None;
+        let mut hh_data = None;
+        let mut hv_data = None;
+
+        let load_if = |
+            opt_path: &Option<PathBuf>,
+            label: &str,
+            meta: &mut SafeMetadata,
+        | -> Result<Option<Array2<f32>>, SafeError> {
+            if let Some(p) = opt_path {
+                let arr = Self::load_polarization_data_with_options(
+                    p.as_path(),
+                    meta,
+                    effective_target_crs.as_deref(),
+                    resample_alg,
+                    target_size,
+                )?;
+                if meta.lines == 0 || meta.samples == 0 {
+                    meta.lines = arr.nrows();
+                    meta.samples = arr.ncols();
+                }
+                meta.polarizations.push(label.to_string());
+                Ok(Some(arr))
+            } else {
+                Ok(None)
+            }
+        };
+
+        match polarization {
+            Some("vv") | None => {
+                vv_data = load_if(&vv_path, "VV", &mut metadata)?;
+                if vv_data.is_none() { return Err(SafeError::MissingField("VV measurement file")); }
+            }
+            Some("vh") => {
+                vh_data = load_if(&vh_path, "VH", &mut metadata)?;
+                if vh_data.is_none() { return Err(SafeError::MissingField("VH measurement file")); }
+            }
+            Some("hh") => {
+                hh_data = load_if(&hh_path, "HH", &mut metadata)?;
+                if hh_data.is_none() { return Err(SafeError::MissingField("HH measurement file")); }
+            }
+            Some("hv") => {
+                hv_data = load_if(&hv_path, "HV", &mut metadata)?;
+                if hv_data.is_none() { return Err(SafeError::MissingField("HV measurement file")); }
+            }
+            Some("multiband") | Some("vv_vh_pair") | Some("all_pairs") => {
+                vv_data = load_if(&vv_path, "VV", &mut metadata)?;
+                vh_data = load_if(&vh_path, "VH", &mut metadata)?;
+                if vv_data.is_none() || vh_data.is_none() {
+                    return Err(SafeError::MissingField("VV/VH measurement pair"));
+                }
+            }
+            Some("hh_hv_pair") => {
+                hh_data = load_if(&hh_path, "HH", &mut metadata)?;
+                hv_data = load_if(&hv_path, "HV", &mut metadata)?;
+                if hh_data.is_none() || hv_data.is_none() {
+                    return Err(SafeError::MissingField("HH/HV measurement pair"));
+                }
+            }
+            Some(other) => return Err(SafeError::Parse(format!("Unsupported polarization: {}", other))),
+        }
+
+        Ok(SafeReader {
+            base_path: PathBuf::from(base_vsi),
+            metadata,
+            product_type: ProductType::GRD,
+            vv_data,
+            vh_data,
+            hh_data,
+            hv_data,
+        })
+    }
     /// Open and parse a SAFE directory with polarization awareness
     pub fn open<P: AsRef<Path>>(
         safe_dir: P,
@@ -938,10 +1260,13 @@ impl SafeReader {
                 ResampleAlg::NearestNeighbour => "near",
                 ResampleAlg::Bilinear => "bilinear",
                 ResampleAlg::Cubic => "cubic",
+                ResampleAlg::Lanczos => "lanczos",
                 _ => "bilinear",
             };
             // Determine source CRS from dataset
-            let src_ds = Dataset::open(tmp_in)
+            // ensure source can be remote via VSI path
+            let src_vsi = to_gdal_path(tmp_in);
+            let src_ds = Dataset::open(Path::new(src_vsi.as_ref()))
                 .map_err(|e| SafeError::Parse(format!("GDAL open error: {}", e)))?;
             let ds_proj = src_ds.projection();
             // Helper: parse EPSG from a WKT string
@@ -1028,7 +1353,8 @@ impl SafeReader {
             }
             args.push("-t_srs".into());
             args.push(dst.to_string());
-            args.push(tmp_in.to_str().unwrap().to_string());
+            // pass VSI path into gdalwarp
+            args.push(src_vsi.into_owned());
             args.push(tmp_out.to_str().unwrap().to_string());
             let status = Command::new("gdalwarp")
                 .args(args.iter().map(|s| s.as_str()))
@@ -1760,6 +2086,147 @@ pub fn resolve_auto_target_crs<P: AsRef<Path>>(safe_dir: P) -> Option<String> {
     };
     let epsg = lonlat_to_epsg(lon, lat);
     info!("AUTO-CRS: resolved target CRS = {}", epsg);
+    Some(epsg)
+}
+
+/// Resolve an automatic target CRS (EPSG:XXXXX) based on any raster dataset path
+/// including GDAL VSI paths (e.g., /vsicurl/, /vsizip//vsicurl/...).
+/// Uses the same centroid-from-GCPs or gdalinfo-json fallback strategy.
+fn resolve_auto_target_crs_from_dataset_path<P: AsRef<Path>>(dataset_path: P) -> Option<String> {
+    let path_ref = dataset_path.as_ref();
+    let mut lonlat: Option<(f64, f64)> = None;
+
+    // Preferred: use GDAL GCP API to read lon/lat from GCPs
+    match Dataset::open(path_ref) {
+        Ok(ds) => {
+            let gcp_proj = ds.gcp_projection().unwrap_or_else(|| "".to_string());
+            let proj_is_geographic = gcp_proj.contains("GEOGCS")
+                || gcp_proj.contains("WGS 84")
+                || gcp_proj.starts_with("EPSG:4326");
+            if proj_is_geographic {
+                let gcps = ds.gcps();
+                if !gcps.is_empty() {
+                    let mut sum_lon = 0.0;
+                    let mut sum_lat = 0.0;
+                    let mut count = 0.0;
+                    for g in gcps {
+                        sum_lon += g.x();
+                        sum_lat += g.y();
+                        count += 1.0;
+                    }
+                    if count > 0.0 {
+                        lonlat = Some((sum_lon / count, sum_lat / count));
+                        info!(
+                            "AUTO-CRS (remote): centroid from GDAL GCPs: lon={:.6}, lat={:.6}",
+                            sum_lon / count,
+                            sum_lat / count
+                        );
+                    } else {
+                        warn!("AUTO-CRS (remote): GDAL reports zero GCPs");
+                    }
+                } else {
+                    warn!("AUTO-CRS (remote): no GCPs available via GDAL API");
+                }
+            } else {
+                warn!(
+                    "AUTO-CRS (remote): GCP projection not geographic or empty; proj='{}'",
+                    gcp_proj
+                );
+            }
+        }
+        Err(e) => warn!("AUTO-CRS (remote): GDAL open failed for candidate: {}", e),
+    }
+
+    // Fallback: gdalinfo -json
+    if lonlat.is_none() {
+        let output = Command::new("gdalinfo")
+            .arg("-json")
+            .arg(path_ref.as_os_str())
+            .output();
+        if let Ok(out) = output {
+            if out.status.success() {
+                if let Ok(json_text) = std::str::from_utf8(&out.stdout) {
+                    if let Ok(v) = serde_json::from_str::<Value>(json_text) {
+                        // Try wgs84Extent
+                        if let Some(ext) = v.get("wgs84Extent") {
+                            if let Some(coords) = ext
+                                .get("coordinates")
+                                .and_then(|c| c.as_array())
+                                .and_then(|arr| arr.get(0))
+                                .and_then(|ring| ring.as_array())
+                            {
+                                let mut sum_lon = 0.0;
+                                let mut sum_lat = 0.0;
+                                let mut count = 0.0;
+                                for pt in coords {
+                                    if let Some(pair) = pt.as_array() {
+                                        if pair.len() >= 2 {
+                                            if let (Some(lon), Some(lat)) =
+                                                (pair[0].as_f64(), pair[1].as_f64())
+                                            {
+                                                sum_lon += lon;
+                                                sum_lat += lat;
+                                                count += 1.0;
+                                            }
+                                        }
+                                    }
+                                }
+                                if count > 0.0 {
+                                    lonlat = Some((sum_lon / count, sum_lat / count));
+                                    info!(
+                                        "AUTO-CRS (remote): centroid from wgs84Extent: lon={:.6}, lat={:.6}",
+                                        sum_lon / count,
+                                        sum_lat / count
+                                    );
+                                }
+                            }
+                        }
+                        // GCPs list
+                        if lonlat.is_none() {
+                            if let Some(gcps_obj) = v.get("gcps").and_then(|g| g.as_object()) {
+                                if let Some(list) = gcps_obj
+                                    .get("gcpList")
+                                    .and_then(|l| l.as_array())
+                                {
+                                    let mut sum_lon = 0.0;
+                                    let mut sum_lat = 0.0;
+                                    let mut count = 0.0;
+                                    for gcp in list {
+                                        if let (Some(lon), Some(lat)) = (
+                                            gcp.get("lon").and_then(|x| x.as_f64()),
+                                            gcp.get("lat").and_then(|x| x.as_f64()),
+                                        ) {
+                                            sum_lon += lon;
+                                            sum_lat += lat;
+                                            count += 1.0;
+                                        }
+                                    }
+                                    if count > 0.0 {
+                                        lonlat = Some((sum_lon / count, sum_lat / count));
+                                        info!(
+                                            "AUTO-CRS (remote): centroid from gdalinfo GCPs: lon={:.6}, lat={:.6}",
+                                            sum_lon / count,
+                                            sum_lat / count
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let (lon, lat) = match lonlat {
+        Some(v) => v,
+        None => {
+            warn!("AUTO-CRS (remote): could not compute lon/lat from GDAL or gdalinfo JSON");
+            return None;
+        }
+    };
+    let epsg = lonlat_to_epsg(lon, lat);
+    info!("AUTO-CRS (remote): resolved target CRS = {}", epsg);
     Some(epsg)
 }
 

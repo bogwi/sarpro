@@ -3,6 +3,7 @@ use gdal::{Dataset, Metadata, errors::GdalError as GdalCrateError};
 use ndarray::Array2;
 use std::collections::HashMap;
 use std::path::Path;
+use std::borrow::Cow;
 use thiserror::Error;
 
 /// Errors encountered when using GDAL reader
@@ -55,7 +56,8 @@ fn parse_epsg(wkt: &str) -> Option<String> {
 impl GdalSarReader {
     /// Open a GDAL-supported dataset (e.g., GeoTIFF, NetCDF, HDF5, ENVI)
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, GdalError> {
-        let dataset = Dataset::open(path.as_ref())?;
+        let vsi = to_gdal_path(path.as_ref());
+        let dataset = Dataset::open(Path::new(vsi.as_ref()))?;
         let (size_x, size_y) = dataset.raster_size();
         let bands = dataset.raster_count() as usize;
         if bands == 0 {
@@ -184,4 +186,32 @@ impl GdalSarReader {
         }
         Ok(result)
     }
+}
+
+/// Map a local path or URL to a GDAL VSI path usable with Dataset::open and GDAL tools
+/// - http/https URLs -> /vsicurl/<url>
+/// - .zip over http/https -> /vsizip//vsicurl/<url>
+/// - already-prefixed VSI paths are returned as-is
+/// - local filesystem paths are returned borrowed
+pub fn to_gdal_path(p: &Path) -> Cow<'_, str> {
+    let s = p.to_string_lossy();
+    // If already a VSI path, return as-is
+    if s.starts_with("/vsicurl/") || s.starts_with("/vsizip/") || s.starts_with("/vsimem/") {
+        return Cow::from(s.into_owned());
+    }
+    // HTTP(S) handling
+    if s.starts_with("http://") || s.starts_with("https://") {
+        if s.to_lowercase().ends_with(".zip") {
+            // Remote ZIP containing SAFE
+            return Cow::from(format!("/vsizip//vsicurl/{}", s));
+        } else {
+            return Cow::from(format!("/vsicurl/{}", s));
+        }
+    }
+    // Local .zip file
+    if s.to_lowercase().ends_with(".zip") {
+        return Cow::from(format!("/vsizip/{}", s));
+    }
+    // Local path
+    Cow::from(s.into_owned())
 }
