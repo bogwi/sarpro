@@ -11,6 +11,7 @@ use sarpro::io::sentinel1::TargetCrsArg;
 use sarpro::io::SafeReader;
 use sarpro::types::{BitDepth, OutputFormat, ProcessingOperation, SyntheticRgbMode};
 use sarpro::{AutoscaleStrategy, BitDepthArg, InputFormat, Polarization, PolarizationOperation};
+use sarpro::core::params::ProcessingOptions;
 
 use super::args::CliArgs;
 use super::errors::AppError;
@@ -29,6 +30,7 @@ fn process_single_file(
     target_crs: Option<&str>,
     resample_alg: Option<&str>,
     synrgb_mode: SyntheticRgbMode,
+    _proc_opts: &ProcessingOptions,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let polarization_str = match polarization {
         Polarization::Vv => None,
@@ -265,6 +267,39 @@ fn process_single_file(
     }
 }
 
+fn build_processing_options_from_args(args: &CliArgs) -> ProcessingOptions {
+    // Map size string to Option<usize>
+    let size_opt = if args.size == "original" {
+        None
+    } else {
+        args.size.parse::<usize>().ok().filter(|v| *v > 0)
+    };
+
+    let mut opts = ProcessingOptions::default();
+    opts.format = args.format;
+    opts.input_format = args.input_format;
+    opts.bit_depth = args.bit_depth;
+    opts.polarization = args.polarization;
+    opts.autoscale = args.autoscale;
+    opts.synrgb_mode = args.synrgb_mode;
+    opts.size = size_opt;
+    opts.pad = args.pad;
+    opts.target_crs = args.target_crs.clone();
+    opts.resample_alg = args.resample_alg.clone();
+
+    // Phase 1 flags: set STAC/IO hints; functionality comes in later steps
+    opts.stac.in_path = args.stac_item.as_ref().map(|s| std::path::PathBuf::from(s));
+    opts.io.remote = args.safe_zip_url.is_some()
+        || args.vv_url.is_some()
+        || args.vh_url.is_some()
+        || args.hh_url.is_some()
+        || args.hv_url.is_some()
+        || opts.stac.in_path.is_some();
+    opts.io.cache_dir = args.remote_cache_dir.clone();
+
+    opts
+}
+
 pub fn run(args: CliArgs) -> Result<(), Box<dyn std::error::Error>> {
     if args.log {
         tracing_subscriber::fmt()
@@ -273,6 +308,24 @@ pub fn run(args: CliArgs) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let batch_mode = args.batch || args.input_dir.is_some();
+
+    // Build ProcessingOptions aggregate (threaded but not yet acted upon by legacy path)
+    let proc_opts = build_processing_options_from_args(&args);
+
+    // Enforce mutually exclusive input modes when new flags are used
+    let mut selected_modes = 0;
+    if args.input.is_some() || args.input_dir.is_some() { selected_modes += 1; }
+    if args.stac_item.is_some() { selected_modes += 1; }
+    if args.safe_zip_url.is_some() { selected_modes += 1; }
+    if args.vv_url.is_some() || args.vh_url.is_some() || args.hh_url.is_some() || args.hv_url.is_some() { selected_modes += 1; }
+    if selected_modes > 1 {
+        return Err(AppError::MissingArgument { arg: "Select exactly one input mode (legacy --input/--input-dir OR one of: --stac-item | --safe-zip-url | --*-url)".to_string() }.into());
+    }
+
+    // For Step 2, if a new mode is selected, return a clear message (implemented in next steps)
+    if args.stac_item.is_some() || args.safe_zip_url.is_some() || args.vv_url.is_some() || args.vh_url.is_some() || args.hh_url.is_some() || args.hv_url.is_some() {
+        return Err("Remote I/O and STAC-in flags are available but not yet active in this step. Use --input/--input-dir for now.".into());
+    }
 
     if batch_mode {
         let input_dir = args.input_dir.ok_or(AppError::MissingArgument {
@@ -323,6 +376,7 @@ pub fn run(args: CliArgs) -> Result<(), Box<dyn std::error::Error>> {
                     args.target_crs.as_deref(),
                     args.resample_alg.as_deref(),
                     args.synrgb_mode,
+                    &proc_opts,
                 ) {
                     Ok(()) => {
                         info!("Successfully processed: {:?}\n", path);
@@ -365,6 +419,7 @@ pub fn run(args: CliArgs) -> Result<(), Box<dyn std::error::Error>> {
             args.target_crs.as_deref(),
             args.resample_alg.as_deref(),
             args.synrgb_mode,
+            &proc_opts,
         )?;
         info!("Successfully processed: {:?} -> {:?}\n", input, output);
     }

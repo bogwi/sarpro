@@ -5,7 +5,7 @@ use std::path::Path;
 
 use ndarray::Array2;
 
-use crate::core::params::ProcessingParams;
+use crate::core::params::{ProcessingParams, ProcessingOptions};
 use crate::core::processing::pipeline::process_scalar_data_pipeline;
 use crate::core::processing::resize::resize_image_data;
 use crate::core::processing::save::{
@@ -671,6 +671,29 @@ pub fn process_safe_to_path(input: &Path, output: &Path, params: &ProcessingPara
             .map_err(|e| Error::external(e))
         }
     }
+}
+
+/// Internal helper to mirror `process_safe_to_path` but accept `ProcessingOptions`.
+/// For Phase 1 this simply maps to the same behavior as `ProcessingParams`.
+pub(crate) fn process_safe_to_path_with_options(
+    input: &Path,
+    output: &Path,
+    opts: &ProcessingOptions,
+) -> Result<()> {
+    // Build a temporary ProcessingParams to reuse the legacy path without behavior change
+    let params = ProcessingParams {
+        format: opts.format,
+        input_format: opts.input_format,
+        bit_depth: match opts.bit_depth { crate::BitDepthArg::U8 => crate::BitDepthArg::U8, crate::BitDepthArg::U16 => crate::BitDepthArg::U16 },
+        polarization: opts.polarization,
+        autoscale: opts.autoscale,
+        synrgb_mode: opts.synrgb_mode,
+        size: opts.size,
+        pad: opts.pad,
+        target_crs: opts.target_crs.clone(),
+        resample_alg: opts.resample_alg.clone(),
+    };
+    process_safe_to_path(input, output, &params)
 }
 
 /// Convenience variant with explicit options (typed)

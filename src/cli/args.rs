@@ -74,4 +74,47 @@ pub struct CliArgs {
     /// Synthetic RGB mode (only used when --format jpeg and --polarization multiband)
     #[arg(long = "synrgb-mode", value_enum, default_value_t = SyntheticRgbMode::Default)]
     pub synrgb_mode: SyntheticRgbMode,
+
+    // --- Phase 1 additions (non-breaking) ---
+    /// Load inputs from a STAC Item (local file path or HTTP URL)
+    #[arg(long = "stac-item")]
+    pub stac_item: Option<String>,
+
+    /// Open a remote SAFE packaged as a ZIP via VSICURL/VSIZIP
+    #[arg(long = "safe-zip-url")]
+    pub safe_zip_url: Option<String>,
+
+    /// Explicit measurement URLs (VSICURL). Use with --polarization appropriately
+    #[arg(long = "vv-url")]
+    pub vv_url: Option<String>,
+    #[arg(long = "vh-url")]
+    pub vh_url: Option<String>,
+    #[arg(long = "hh-url")]
+    pub hh_url: Option<String>,
+    #[arg(long = "hv-url")]
+    pub hv_url: Option<String>,
+
+    /// OAuth bearer token to access authenticated endpoints (mapped to GDAL headers later)
+    #[arg(long = "auth-bearer")]
+    pub auth_bearer: Option<String>,
+
+    /// HTTP timeout in seconds for remote reads (GDAL)
+    #[arg(long = "http-timeout", default_value_t = 120u64)]
+    pub http_timeout: u64,
+
+    /// Number of HTTP retries for transient errors
+    #[arg(long = "http-retries", default_value_t = 3u32)]
+    pub http_retries: u32,
+
+    /// Base backoff in milliseconds between retries
+    #[arg(long = "http-backoff-ms", default_value_t = 500u64)]
+    pub http_backoff_ms: u64,
+
+    /// Optional directory for remote cache/materialization
+    #[arg(long = "remote-cache-dir")]
+    pub remote_cache_dir: Option<PathBuf>,
+
+    /// Remote cache mode: stream (default) or materialize
+    #[arg(long = "remote-cache-mode", default_value = "stream")]
+    pub remote_cache_mode: String,
 }

@@ -1,6 +1,6 @@
 use crate::gui::logging::{GuiLogLayer, LogEntry};
 use crate::{AutoscaleStrategy, InputFormat, Polarization, PolarizationOperation};
-use crate::{BitDepth, OutputFormat};
+use crate::{BitDepth, OutputFormat, BitDepthArg};
 use crate::types::SyntheticRgbMode;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,7 @@ use sysinfo;
 use tracing::Level;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{EnvFilter, Registry};
+use crate::core::params::ProcessingOptions;
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub enum SizeMode {
@@ -122,6 +123,29 @@ impl Default for SarproGui {
 }
 
 impl SarproGui {
+    pub fn build_processing_options(&self) -> ProcessingOptions {
+        // Map GUI state into the internal aggregate (Phase 1 threading)
+        let size_opt = match self.size_mode {
+            SizeMode::Original => None,
+            SizeMode::Predefined(v) => Some(v),
+            SizeMode::Custom => self.custom_size.parse::<usize>().ok().filter(|v| *v > 0),
+        };
+
+        let mut opts = ProcessingOptions::default();
+        opts.format = self.output_format;
+        opts.input_format = self.input_format;
+        opts.bit_depth = match self.bit_depth { BitDepth::U8 => BitDepthArg::U8, BitDepth::U16 => BitDepthArg::U16 };
+        opts.polarization = self.polarization;
+        opts.autoscale = self.autoscale;
+        opts.synrgb_mode = self.synrgb_mode;
+        opts.size = size_opt;
+        opts.pad = self.pad;
+        let target = self.target_crs.trim();
+        opts.target_crs = if target.is_empty() { None } else { Some(target.to_string()) };
+        let resample = self.resample_alg.trim();
+        opts.resample_alg = if resample.is_empty() { None } else { Some(resample.to_string()) };
+        opts
+    }
     pub fn save_logs_to_file(&self) -> Result<(), Box<dyn std::error::Error>> {
         // Get current logs
         let logs = self
