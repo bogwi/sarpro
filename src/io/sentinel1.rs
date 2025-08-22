@@ -9,6 +9,7 @@ use tracing::info;
 use tracing::warn;
 
 use crate::io::gdal::{GdalSarReader, to_gdal_path};
+use crate::types::Polarization;
 use gdal::Dataset;
 use gdal::raster::Buffer;
 use gdal::raster::ResampleAlg;
@@ -241,7 +242,7 @@ impl SafeReader {
     /// Open a remote SAFE packaged as a ZIP (URL or local .zip) using VSIZIP/VSICURL.
     pub fn open_from_safe_zip_url(
         zip_href: &str,
-        polarization: Option<&str>,
+        polarization: Polarization,
         target_crs: Option<TargetCrsArg>,
         resample_alg: Option<ResampleAlg>,
         target_size: Option<usize>,
@@ -401,37 +402,48 @@ impl SafeReader {
         };
 
         match polarization {
-            Some("vv") | None => {
+            Polarization::Vv => {
                 vv_data = load_if(&vv_path, "VV", &mut metadata)?;
                 if vv_data.is_none() { return Err(SafeError::MissingField("VV measurement file")); }
             }
-            Some("vh") => {
+            Polarization::Vh => {
                 vh_data = load_if(&vh_path, "VH", &mut metadata)?;
                 if vh_data.is_none() { return Err(SafeError::MissingField("VH measurement file")); }
             }
-            Some("hh") => {
+            Polarization::Hh => {
                 hh_data = load_if(&hh_path, "HH", &mut metadata)?;
                 if hh_data.is_none() { return Err(SafeError::MissingField("HH measurement file")); }
             }
-            Some("hv") => {
+            Polarization::Hv => {
                 hv_data = load_if(&hv_path, "HV", &mut metadata)?;
                 if hv_data.is_none() { return Err(SafeError::MissingField("HV measurement file")); }
             }
-            Some("multiband") | Some("vv_vh_pair") | Some("all_pairs") => {
-                vv_data = load_if(&vv_path, "VV", &mut metadata)?;
-                vh_data = load_if(&vh_path, "VH", &mut metadata)?;
-                if vv_data.is_none() || vh_data.is_none() {
-                    return Err(SafeError::MissingField("VV/VH measurement pair"));
+            Polarization::Multiband => {
+                // Prefer VV/VH if available, else HH/HV
+                if vv_path.is_some() && vh_path.is_some() {
+                    vv_data = load_if(&vv_path, "VV", &mut metadata)?;
+                    vh_data = load_if(&vh_path, "VH", &mut metadata)?;
+                } else if hh_path.is_some() && hv_path.is_some() {
+                    hh_data = load_if(&hh_path, "HH", &mut metadata)?;
+                    hv_data = load_if(&hv_path, "HV", &mut metadata)?;
+                }
+                if (vv_data.is_none() || vh_data.is_none()) && (hh_data.is_none() || hv_data.is_none()) {
+                    return Err(SafeError::MissingField("VV/VH or HH/HV measurement pair"));
                 }
             }
-            Some("hh_hv_pair") => {
-                hh_data = load_if(&hh_path, "HH", &mut metadata)?;
-                hv_data = load_if(&hv_path, "HV", &mut metadata)?;
-                if hh_data.is_none() || hv_data.is_none() {
-                    return Err(SafeError::MissingField("HH/HV measurement pair"));
+            Polarization::OP(_op) => {
+                // Operations require a pair; prefer VV/VH else HH/HV
+                if vv_path.is_some() && vh_path.is_some() {
+                    vv_data = load_if(&vv_path, "VV", &mut metadata)?;
+                    vh_data = load_if(&vh_path, "VH", &mut metadata)?;
+                } else if hh_path.is_some() && hv_path.is_some() {
+                    hh_data = load_if(&hh_path, "HH", &mut metadata)?;
+                    hv_data = load_if(&hv_path, "HV", &mut metadata)?;
+                }
+                if (vv_data.is_none() || vh_data.is_none()) && (hh_data.is_none() || hv_data.is_none()) {
+                    return Err(SafeError::MissingField("VV/VH or HH/HV measurement pair"));
                 }
             }
-            Some(other) => return Err(SafeError::Parse(format!("Unsupported polarization: {}", other))),
         }
 
         Ok(SafeReader {

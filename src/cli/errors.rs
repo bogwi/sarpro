@@ -27,4 +27,7 @@ pub enum AppError {
 
     #[error("SAFE reader error: {0}")]
     Safe(#[from] sarpro::io::SafeError),
+
+    #[error("Cannot list remote directory: {url}. {hint}")]
+    RemoteDirListing { url: String, hint: String },
 }
