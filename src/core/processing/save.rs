@@ -82,7 +82,7 @@ pub fn save_processed_image(
                     gt_override = Some(gt);
                 }
                 if let Some(p) = &meta.projection {
-                    proj_override = Some(p.clone());
+                    proj_override = Some(p.to_string());
                 }
             }
 
@@ -152,7 +152,7 @@ pub fn save_processed_image(
                 }
                 if let Some(p) = &meta.projection {
                     write_prj_file(output, p)?;
-                    proj_override = Some(p.clone());
+                    proj_override = Some(p.to_string());
                 }
                 create_jpeg_metadata_sidecar_with_overrides(
                     output,
@@ -231,7 +231,7 @@ pub fn save_processed_multiband_image_sequential(
                     gt_override = Some(gt);
                 }
                 if let Some(p) = &meta.projection {
-                    proj_override = Some(p.clone());
+                    proj_override = Some(p.to_string());
                 }
             }
 
@@ -386,7 +386,7 @@ pub fn save_processed_multiband_image_sequential(
                 }
                 if let Some(p) = &meta.projection {
                     write_prj_file(output, p)?;
-                    proj_override = Some(p.clone());
+                    proj_override = Some(p.to_string());
                 }
                 // Attach synthetic_rgb_mode to JPEG sidecar
                 create_jpeg_metadata_sidecar_with_overrides_and_extras(
