@@ -28,14 +28,6 @@ pub fn process_single_file(
     synrgb_mode: SyntheticRgbMode,
     _proc_opts: &ProcessingOptions,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let polarization_str = match polarization {
-        Polarization::Vv => None,
-        Polarization::Vh => Some("vh"),
-        Polarization::Hh => Some("hh"),
-        Polarization::Hv => Some("hv"),
-        Polarization::Multiband | Polarization::OP(_) => Some("all_pairs"),
-    };
-
     // autoscale now passed as typed enum directly
 
     let target_size = if size == "original" {
@@ -72,7 +64,7 @@ pub fn process_single_file(
                 };
                 match SafeReader::open_with_warnings_with_options(
                     input,
-                    polarization_str,
+                    polarization,
                     target_arg,
                     resample,
                     target_size,
@@ -103,7 +95,7 @@ pub fn process_single_file(
                 };
                 SafeReader::open_with_options(
                     input,
-                    polarization_str,
+                    polarization,
                     target_arg,
                     resample_alg,
                     target_size,

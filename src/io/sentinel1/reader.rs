@@ -4,12 +4,14 @@ use tracing::{info, warn};
 use chrono;
 
 use crate::io::gdal::to_gdal_path;
+use crate::Polarization;
 use gdal::raster::ResampleAlg;
 
 use super::errors::SafeError;
 use super::types::{ProductType, SafeMetadata, TargetCrsArg};
 use super::data_loader::load_polarization_data_with_options;
 use super::crs_utils::resolve_auto_target_crs_from_dataset_path;
+
 
 // Include the implementation methods from reader_methods.rs
 // Note: reader_methods.rs contains the implementation methods using `impl super::SafeReader`
@@ -26,6 +28,234 @@ pub struct SafeReader {
 }
 
 impl SafeReader {
+    /// Helper to load polarization data and update metadata dimensions/labels
+    fn load_and_note(
+        path: &std::path::Path,
+        label: &str,
+        meta: &mut SafeMetadata,
+        target_crs: Option<&str>,
+        resample_alg: Option<gdal::raster::ResampleAlg>,
+        target_size: Option<usize>,
+    ) -> Result<ndarray::Array2<f32>, SafeError> {
+        let arr = load_polarization_data_with_options(
+            path, meta, target_crs, resample_alg, target_size
+        )?;
+        if meta.lines == 0 || meta.samples == 0 {
+            meta.lines = arr.nrows();
+            meta.samples = arr.ncols();
+        }
+        meta.polarizations.push(label.to_string());
+        Ok(arr)
+    }
+
+    /// Internal helper for unified SAFE directory opening with different error policies
+    fn open_dir_internal(
+        base: &std::path::Path,
+        polarization: Polarization,
+        target_crs: Option<TargetCrsArg>,
+        resample_alg: Option<ResampleAlg>,
+        target_size: Option<usize>,
+        warn_mode: bool,
+    ) -> Result<Option<SafeReader>, SafeError> {
+        use super::discovery::identify_polarization_files;
+
+        use super::manifest_parser::parse_comprehensive_metadata;
+        use super::crs_utils::resolve_auto_target_crs;
+
+        let annotation = base.join("annotation");
+        let measurement = base.join("measurement");
+        if !annotation.is_dir() {
+            return if warn_mode {
+                Ok(None)
+            } else {
+                Err(SafeError::MissingField("annotation directory"))
+            };
+        }
+        if !measurement.is_dir() {
+            return if warn_mode {
+                Ok(None)
+            } else {
+                Err(SafeError::MissingField("measurement directory"))
+            };
+        }
+
+        // Parse comprehensive metadata from manifest.safe and annotation files
+        let mut metadata = parse_comprehensive_metadata(&base)?;
+
+        // Detect product type from metadata
+        info!("Detecting product type from metadata");
+        let product_type = match metadata.product_type.to_uppercase().as_str() {
+            "GRD" => ProductType::GRD,
+            unsupported => {
+                if warn_mode {
+                    warn!("Skipping unsupported product type: {} (file: {:?})", unsupported, base);
+                    return Ok(None);
+                } else {
+                    return Err(SafeError::UnsupportedProduct(unsupported.to_string()));
+                }
+            }
+        };
+
+        // Identify polarization files based on metadata and requested polarization
+        info!("Identifying polarization files");
+        let (vv_path, vh_path, hh_path, hv_path) =
+            identify_polarization_files(&measurement, &metadata.polarizations)?;
+
+        // Resolve effective target CRS exactly once per product
+        let effective_target_crs: Option<String> = match target_crs {
+            Some(TargetCrsArg::Custom(s)) => Some(s),
+            Some(TargetCrsArg::None) => None,
+            Some(TargetCrsArg::Auto) => resolve_auto_target_crs(&base),
+            None => None,
+        };
+
+        // Load data based on requested polarization
+        let mut vv_data = None;
+        let mut vh_data = None;
+        let mut hh_data = None;
+        let mut hv_data = None;
+
+        let missing_field = |field: &str| -> Result<Option<SafeReader>, SafeError> {
+            if warn_mode {
+                warn!("{} measurement file not found, skipping product", field);
+                Ok(None)
+            } else {
+                Err(SafeError::MissingField("measurement file"))
+            }
+        };
+
+        match polarization {
+            Polarization::Vv => {
+                metadata.polarizations.clear();
+                if let Some(path) = vv_path {
+                    info!("Loading VV polarization data");
+                    vv_data = Some(Self::load_and_note(
+                        &path, "VV", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
+                } else {
+                    return missing_field("VV");
+                }
+            }
+            Polarization::Vh => {
+                metadata.polarizations.clear();
+                if let Some(path) = vh_path {
+                    info!("Loading VH polarization data");
+                    vh_data = Some(Self::load_and_note(
+                        &path, "VH", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
+                } else {
+                    return missing_field("VH");
+                }
+            }
+            Polarization::Hh => {
+                metadata.polarizations.clear();
+                if let Some(path) = hh_path {
+                    info!("Loading HH polarization data");
+                    hh_data = Some(Self::load_and_note(
+                        &path, "HH", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
+                } else {
+                    return missing_field("HH");
+                }
+            }
+            Polarization::Hv => {
+                metadata.polarizations.clear();
+                if let Some(path) = hv_path {
+                    info!("Loading HV polarization data");
+                    hv_data = Some(Self::load_and_note(
+                        &path, "HV", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
+                } else {
+                    return missing_field("HV");
+                }
+            }
+            Polarization::Multiband => {
+                metadata.polarizations.clear();
+                if let Some(path) = vv_path {
+                    info!("Loading VV polarization data");
+                    vv_data = Some(Self::load_and_note(
+                        &path, "VV", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
+                }
+                if let Some(path) = vh_path {
+                    info!("Loading VH polarization data");
+                    vh_data = Some(Self::load_and_note(
+                        &path, "VH", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
+                }
+                if let Some(path) = hh_path {
+                    info!("Loading HH polarization data");
+                    hh_data = Some(Self::load_and_note(
+                        &path, "HH", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
+                }
+                if let Some(path) = hv_path {
+                    info!("Loading HV polarization data");
+                    hv_data = Some(Self::load_and_note(
+                        &path, "HV", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
+                }
+                if vv_data.is_none() && vh_data.is_none() && hh_data.is_none() && hv_data.is_none() {
+                    if warn_mode {
+                        warn!("No polarization files found, skipping product");
+                        return Ok(None);
+                    } else {
+                        return Err(SafeError::MissingField("No measurement files found"));
+                    }
+                }
+            }
+            Polarization::OP(_) => {
+                metadata.polarizations.clear();
+                if let Some(path) = vv_path {
+                    info!("Loading VV polarization data");
+                    vv_data = Some(Self::load_and_note(
+                        &path, "VV", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
+                }
+                if let Some(path) = vh_path {
+                    info!("Loading VH polarization data");
+                    vh_data = Some(Self::load_and_note(
+                        &path, "VH", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
+                }
+                if let Some(path) = hh_path {
+                    info!("Loading HH polarization data");
+                    hh_data = Some(Self::load_and_note(
+                        &path, "HH", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
+                }
+                if let Some(path) = hv_path {
+                    info!("Loading HV polarization data");
+                    hv_data = Some(Self::load_and_note(
+                        &path, "HV", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
+                }
+            }
+        }
+
+        Ok(Some(SafeReader {
+            base_path: base.to_path_buf(),
+            metadata,
+            product_type,
+            vv_data,
+            vh_data,
+            hh_data,
+            hv_data,
+        }))
+    }
+
     /// Open explicit measurement URLs/paths (VV/VH/HH/HV) without a SAFE folder.
     /// Minimal metadata is constructed from datasets; product_type is set to GRD.
     pub fn open_from_measurements(
@@ -38,48 +268,11 @@ impl SafeReader {
         target_size: Option<usize>,
     ) -> Result<Self, SafeError> {
         let mut meta = SafeMetadata {
-            instrument: String::new(),
-            platform: String::new(),
-            acquisition_start: String::new(),
-            acquisition_stop: String::new(),
-            orbit_number: 0,
-            polarizations: Vec::new(),
-            lines: 0,
-            samples: 0,
             product_type: "GRD".to_string(),
-            range_sampling_rate: None,
-            radar_frequency: None,
-            prf: None,
-            tx_pulse_length: None,
-            tx_pulse_ramp_rate: None,
-            velocity: None,
-            slant_range_near: None,
-            geotransform: None,
-            projection: None,
-            crs: None,
-            pixel_spacing_range: None,
-            pixel_spacing_azimuth: None,
-            instrument_mode: None,
-            pass_direction: None,
-            data_take_id: None,
-            product_id: None,
-            processing_level: None,
-            multilook_factor: None,
-            calibration_type: None,
-            noise_estimate: None,
-            processing_center: None,
-            software_version: None,
-            pixel_data_type: None,
-            bits_per_sample: None,
-            sample_format: None,
-            incidence_angle: None,
-            look_angle: None,
-            doppler_centroid: None,
-            radiometric_calibration: None,
-            geometric_calibration: None,
             conversion_tool: "SARPRO".to_string(),
             conversion_version: env!("CARGO_PKG_VERSION").to_string(),
             conversion_timestamp: chrono::Utc::now().to_rfc3339(),
+            ..Default::default()
         };
 
         // Resolve effective target CRS; support AUTO by probing the first provided dataset
@@ -100,31 +293,30 @@ impl SafeReader {
         let mut reader_hh: Option<Array2<f32>> = None;
         let mut reader_hv: Option<Array2<f32>> = None;
 
-        // Helper to load and also update base georef/dims if empty
-        let mut load_and_update = |
-            href: &str,
-            pol_label: &str,
-        | -> Result<Array2<f32>, SafeError> {
-            let p = Path::new(href);
-            let arr = load_polarization_data_with_options(
-                p,
-                &mut meta,
-                effective_target_crs.as_deref(),
-                resample_alg,
-                target_size,
-            )?;
-            if meta.lines == 0 || meta.samples == 0 {
-                meta.lines = arr.nrows();
-                meta.samples = arr.ncols();
-            }
-            meta.polarizations.push(pol_label.to_uppercase());
-            Ok(arr)
-        };
-
-        if let Some(href) = vv { reader_vv = Some(load_and_update(href, "VV")?); }
-        if let Some(href) = vh { reader_vh = Some(load_and_update(href, "VH")?); }
-        if let Some(href) = hh { reader_hh = Some(load_and_update(href, "HH")?); }
-        if let Some(href) = hv { reader_hv = Some(load_and_update(href, "HV")?); }
+        if let Some(href) = vv {
+            reader_vv = Some(Self::load_and_note(
+                Path::new(href), "VV", &mut meta,
+                effective_target_crs.as_deref(), resample_alg, target_size
+            )?);
+        }
+        if let Some(href) = vh {
+            reader_vh = Some(Self::load_and_note(
+                Path::new(href), "VH", &mut meta,
+                effective_target_crs.as_deref(), resample_alg, target_size
+            )?);
+        }
+        if let Some(href) = hh {
+            reader_hh = Some(Self::load_and_note(
+                Path::new(href), "HH", &mut meta,
+                effective_target_crs.as_deref(), resample_alg, target_size
+            )?);
+        }
+        if let Some(href) = hv {
+            reader_hv = Some(Self::load_and_note(
+                Path::new(href), "HV", &mut meta,
+                effective_target_crs.as_deref(), resample_alg, target_size
+            )?);
+        }
 
         if reader_vv.is_none() && reader_vh.is_none() && reader_hh.is_none() && reader_hv.is_none() {
             return Err(SafeError::MissingField("At least one measurement URL must be provided"));
@@ -144,7 +336,7 @@ impl SafeReader {
     /// Open a remote SAFE packaged as a ZIP (URL or local .zip) using VSIZIP/VSICURL.
     pub fn open_from_safe_zip_url(
         zip_href: &str,
-        polarization: crate::types::Polarization,
+        polarization: Polarization,
         target_crs: Option<TargetCrsArg>,
         resample_alg: Option<ResampleAlg>,
         target_size: Option<usize>,
@@ -177,6 +369,7 @@ impl SafeReader {
         let mut vh_path: Option<PathBuf> = None;
         let mut hh_path: Option<PathBuf> = None;
         let mut hv_path: Option<PathBuf> = None;
+        let mut auto_crs_candidate: Option<PathBuf> = None;
 
         for rel in entries {
             let name_lc = rel.to_string_lossy().to_lowercase();
@@ -184,90 +377,58 @@ impl SafeReader {
                 continue;
             }
             let full = PathBuf::from(format!("{}/{}", measurement_dir, rel.to_string_lossy()));
+
+            // Set AUTO CRS candidate from first TIFF found (will be overridden by vv/vh if present)
+            if auto_crs_candidate.is_none() {
+                auto_crs_candidate = Some(full.clone());
+            }
+
             if name_lc.contains("vv") {
                 vv_path = Some(full.clone());
+                auto_crs_candidate = Some(full.clone()); // Prefer VV for AUTO CRS
                 info!("Found VV file: {:?}", full);
             } else if name_lc.contains("vh") {
                 vh_path = Some(full.clone());
+                if auto_crs_candidate.as_ref().map_or(true, |p| !p.to_string_lossy().to_lowercase().contains("vv")) {
+                    auto_crs_candidate = Some(full.clone()); // Prefer VH over non-VV/non-VH
+                }
                 info!("Found VH file: {:?}", full);
             } else if name_lc.contains("hh") {
                 hh_path = Some(full.clone());
+                if auto_crs_candidate.as_ref().map_or(true, |p| {
+                    let p_lc = p.to_string_lossy().to_lowercase();
+                    !p_lc.contains("vv") && !p_lc.contains("vh")
+                }) {
+                    auto_crs_candidate = Some(full.clone()); // Prefer HH over non-polarimetric
+                }
                 info!("Found HH file: {:?}", full);
             } else if name_lc.contains("hv") {
                 hv_path = Some(full.clone());
+                if auto_crs_candidate.as_ref().map_or(true, |p| {
+                    let p_lc = p.to_string_lossy().to_lowercase();
+                    !p_lc.contains("vv") && !p_lc.contains("vh")
+                }) {
+                    auto_crs_candidate = Some(full.clone()); // Prefer HV over non-polarimetric
+                }
                 info!("Found HV file: {:?}", full);
             }
         }
 
         // Minimal metadata
         let mut metadata = SafeMetadata {
-            instrument: String::new(),
-            platform: String::new(),
-            acquisition_start: String::new(),
-            acquisition_stop: String::new(),
-            orbit_number: 0,
-            polarizations: Vec::new(),
-            lines: 0,
-            samples: 0,
             product_type: "GRD".to_string(),
-            range_sampling_rate: None,
-            radar_frequency: None,
-            prf: None,
-            tx_pulse_length: None,
-            tx_pulse_ramp_rate: None,
-            velocity: None,
-            slant_range_near: None,
-            geotransform: None,
-            projection: None,
-            crs: None,
-            pixel_spacing_range: None,
-            pixel_spacing_azimuth: None,
-            instrument_mode: None,
-            pass_direction: None,
-            data_take_id: None,
-            product_id: None,
-            processing_level: None,
-            multilook_factor: None,
-            calibration_type: None,
-            noise_estimate: None,
-            processing_center: None,
-            software_version: None,
-            pixel_data_type: None,
-            bits_per_sample: None,
-            sample_format: None,
-            incidence_angle: None,
-            look_angle: None,
-            doppler_centroid: None,
-            radiometric_calibration: None,
-            geometric_calibration: None,
             conversion_tool: "SARPRO".to_string(),
             conversion_version: env!("CARGO_PKG_VERSION").to_string(),
             conversion_timestamp: chrono::Utc::now().to_rfc3339(),
+            ..Default::default()
         };
 
-        // Resolve effective target CRS once
+        // Resolve effective target CRS once (using candidate from single-pass directory scan)
         let effective_target_crs: Option<String> = match target_crs {
             Some(TargetCrsArg::Custom(s)) => Some(s),
             Some(TargetCrsArg::None) => None,
             Some(TargetCrsArg::Auto) => {
-                // Build a candidate measurement path inside the ZIP if present
-                // Prefer VV/VH, else HH/HV, else first TIFF found
-                let mut candidate: Option<PathBuf> = None;
-                let meas_entries = gdal::vsi::read_dir(&measurement_dir, false)
-                    .map_err(|e| SafeError::Parse(format!("VSIReadDir error: {}", e)))?;
-                for rel in meas_entries.iter() {
-                    let name = rel.to_string_lossy().to_lowercase();
-                    if name.ends_with(".tif") || name.ends_with(".tiff") {
-                        if candidate.is_none() {
-                            candidate = Some(PathBuf::from(format!("{}/{}", measurement_dir, rel.to_string_lossy())));
-                        }
-                        if name.contains("vv") || name.contains("vh") || name.contains("hh") || name.contains("hv") {
-                            candidate = Some(PathBuf::from(format!("{}/{}", measurement_dir, rel.to_string_lossy())));
-                            if name.contains("vv") || name.contains("vh") { break; }
-                        }
-                    }
-                }
-                candidate
+                auto_crs_candidate
                     .as_ref()
                     .and_then(|p| super::crs_utils::resolve_auto_target_crs_from_dataset_path(p))
             }
@@ -279,68 +440,88 @@ impl SafeReader {
         let mut hh_data = None;
         let mut hv_data = None;
 
-        let load_if = |
-            opt_path: &Option<PathBuf>,
-            label: &str,
-            meta: &mut SafeMetadata,
-        | -> Result<Option<Array2<f32>>, SafeError> {
-            if let Some(p) = opt_path {
-                let arr = super::data_loader::load_polarization_data_with_options(
-                    p.as_path(),
-                    meta,
-                    effective_target_crs.as_deref(),
-                    resample_alg,
-                    target_size,
-                )?;
-                if meta.lines == 0 || meta.samples == 0 {
-                    meta.lines = arr.nrows();
-                    meta.samples = arr.ncols();
-                }
-                meta.polarizations.push(label.to_string());
-                Ok(Some(arr))
-            } else {
-                Ok(None)
-            }
-        };
-
         match polarization {
-            crate::types::Polarization::Vv => {
-                vv_data = load_if(&vv_path, "VV", &mut metadata)?;
+            Polarization::Vv => {
+                if let Some(p) = &vv_path {
+                    vv_data = Some(Self::load_and_note(
+                        p.as_path(), "VV", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
+                }
                 if vv_data.is_none() { return Err(SafeError::MissingField("VV measurement file")); }
             }
-            crate::types::Polarization::Vh => {
-                vh_data = load_if(&vh_path, "VH", &mut metadata)?;
+            Polarization::Vh => {
+                if let Some(p) = &vh_path {
+                    vh_data = Some(Self::load_and_note(
+                        p.as_path(), "VH", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
+                }
                 if vh_data.is_none() { return Err(SafeError::MissingField("VH measurement file")); }
             }
-            crate::types::Polarization::Hh => {
-                hh_data = load_if(&hh_path, "HH", &mut metadata)?;
+            Polarization::Hh => {
+                if let Some(p) = &hh_path {
+                    hh_data = Some(Self::load_and_note(
+                        p.as_path(), "HH", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
+                }
                 if hh_data.is_none() { return Err(SafeError::MissingField("HH measurement file")); }
             }
-            crate::types::Polarization::Hv => {
-                hv_data = load_if(&hv_path, "HV", &mut metadata)?;
+            Polarization::Hv => {
+                if let Some(p) = &hv_path {
+                    hv_data = Some(Self::load_and_note(
+                        p.as_path(), "HV", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
+                }
                 if hv_data.is_none() { return Err(SafeError::MissingField("HV measurement file")); }
             }
-            crate::types::Polarization::Multiband => {
+            Polarization::Multiband => {
                 // Prefer VV/VH if available, else HH/HV
                 if vv_path.is_some() && vh_path.is_some() {
-                    vv_data = load_if(&vv_path, "VV", &mut metadata)?;
-                    vh_data = load_if(&vh_path, "VH", &mut metadata)?;
+                    vv_data = Some(Self::load_and_note(
+                        vv_path.as_ref().unwrap(), "VV", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
+                    vh_data = Some(Self::load_and_note(
+                        vh_path.as_ref().unwrap(), "VH", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
                 } else if hh_path.is_some() && hv_path.is_some() {
-                    hh_data = load_if(&hh_path, "HH", &mut metadata)?;
-                    hv_data = load_if(&hv_path, "HV", &mut metadata)?;
+                    hh_data = Some(Self::load_and_note(
+                        hh_path.as_ref().unwrap(), "HH", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
+                    hv_data = Some(Self::load_and_note(
+                        hv_path.as_ref().unwrap(), "HV", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
                 }
                 if (vv_data.is_none() || vh_data.is_none()) && (hh_data.is_none() || hv_data.is_none()) {
                     return Err(SafeError::MissingField("VV/VH or HH/HV measurement pair"));
                 }
             }
-            crate::types::Polarization::OP(_op) => {
+            Polarization::OP(_op) => {
                 // Operations require a pair; prefer VV/VH else HH/HV
                 if vv_path.is_some() && vh_path.is_some() {
-                    vv_data = load_if(&vv_path, "VV", &mut metadata)?;
-                    vh_data = load_if(&vh_path, "VH", &mut metadata)?;
+                    vv_data = Some(Self::load_and_note(
+                        vv_path.as_ref().unwrap(), "VV", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
+                    vh_data = Some(Self::load_and_note(
+                        vh_path.as_ref().unwrap(), "VH", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
                 } else if hh_path.is_some() && hv_path.is_some() {
-                    hh_data = load_if(&hh_path, "HH", &mut metadata)?;
-                    hv_data = load_if(&hv_path, "HV", &mut metadata)?;
+                    hh_data = Some(Self::load_and_note(
+                        hh_path.as_ref().unwrap(), "HH", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
+                    hv_data = Some(Self::load_and_note(
+                        hv_path.as_ref().unwrap(), "HV", &mut metadata,
+                        effective_target_crs.as_deref(), resample_alg, target_size
+                    )?);
                 }
                 if (vv_data.is_none() || vh_data.is_none()) && (hh_data.is_none() || hv_data.is_none()) {
                     return Err(SafeError::MissingField("VV/VH or HH/HV measurement pair"));
@@ -362,7 +543,7 @@ impl SafeReader {
     /// Open and parse a SAFE directory with polarization awareness
     pub fn open<P: AsRef<Path>>(
         safe_dir: P,
-        polarization: Option<&str>,
+        polarization: Polarization,
     ) -> Result<Self, SafeError> {
         Self::open_with_options(safe_dir, polarization, None, None, None)
     }
@@ -370,282 +551,23 @@ impl SafeReader {
     /// Open and parse a SAFE directory with optional reprojection to target CRS
     pub fn open_with_options<P: AsRef<Path>>(
         safe_dir: P,
-        polarization: Option<&str>,
+        polarization: Polarization,
         target_crs: Option<TargetCrsArg>,
         resample_alg: Option<ResampleAlg>,
         target_size: Option<usize>,
     ) -> Result<Self, SafeError> {
-        use super::discovery::identify_polarization_files;
-        use super::data_loader::load_polarization_data_with_options;
-        use super::manifest_parser::parse_comprehensive_metadata;
-        use super::crs_utils::resolve_auto_target_crs;
-
-        let base = safe_dir.as_ref().to_path_buf();
-        let annotation = base.join("annotation");
-        let measurement = base.join("measurement");
-        if !annotation.is_dir() {
-            return Err(SafeError::MissingField("annotation directory"));
+        let base = safe_dir.as_ref();
+        match Self::open_dir_internal(base, polarization, target_crs, resample_alg, target_size, false)? {
+            Some(reader) => Ok(reader),
+            None => Err(SafeError::MissingField("Reader creation failed")), // This shouldn't happen in strict mode
         }
-        if !measurement.is_dir() {
-            return Err(SafeError::MissingField("measurement directory"));
-        }
-
-        // Parse comprehensive metadata from manifest.safe and annotation files
-        let mut metadata = parse_comprehensive_metadata(&base)?;
-
-        // Detect product type from metadata
-        info!("Detecting product type from metadata");
-        let product_type = match metadata.product_type.to_uppercase().as_str() {
-            "GRD" => ProductType::GRD,
-            unsupported => {
-                warn!("Unsupported product type: {}", unsupported);
-                return Err(SafeError::UnsupportedProduct(unsupported.to_string()));
-            }
-        };
-
-        // Identify polarization files based on metadata and requested polarization
-        info!("Identifying polarization files");
-        let (vv_path, vh_path, hh_path, hv_path) =
-            identify_polarization_files(&measurement, &metadata.polarizations)?;
-
-        // Resolve effective target CRS exactly once per product
-        let effective_target_crs: Option<String> = match target_crs {
-            Some(TargetCrsArg::Custom(s)) => Some(s),
-            Some(TargetCrsArg::None) => None,
-            Some(TargetCrsArg::Auto) => resolve_auto_target_crs(&base),
-            None => None,
-        };
-
-        // Load data based on requested polarization
-        let mut vv_data = None;
-        let mut vh_data = None;
-        let mut hh_data = None;
-        let mut hv_data = None;
-
-        match polarization {
-            Some("vv") | None => {
-                metadata.polarizations = vec!["VV".to_string()];
-                // Load VV data (default)
-                if let Some(path) = vv_path {
-                    info!("Loading VV polarization data");
-                    vv_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                } else {
-                    return Err(SafeError::MissingField("VV measurement file"));
-                }
-            }
-            Some("vh") => {
-                metadata.polarizations = vec!["VH".to_string()];
-                // Load VH data
-                if let Some(path) = vh_path {
-                    info!("Loading VH polarization data");
-                    vh_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                } else {
-                    return Err(SafeError::MissingField("VH measurement file"));
-                }
-            }
-            Some("hh") => {
-                metadata.polarizations = vec!["HH".to_string()];
-                // Load HH data
-                if let Some(path) = hh_path {
-                    info!("Loading HH polarization data");
-                    hh_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                } else {
-                    return Err(SafeError::MissingField("HH measurement file"));
-                }
-            }
-            Some("hv") => {
-                metadata.polarizations = vec!["HV".to_string()];
-                // Load HV data
-                if let Some(path) = hv_path {
-                    info!("Loading HV polarization data");
-                    hv_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                } else {
-                    return Err(SafeError::MissingField("HV measurement file"));
-                }
-            }
-            Some("multiband") => {
-                // Load both VV and VH data
-                if let Some(path) = vv_path {
-                    info!("Loading VV polarization data");
-                    vv_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                } else {
-                    return Err(SafeError::MissingField("VV measurement file"));
-                }
-
-                if let Some(path) = vh_path {
-                    info!("Loading VH polarization data");
-                    vh_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                } else {
-                    return Err(SafeError::MissingField("VH measurement file"));
-                }
-            }
-            Some("vv_vh_pair") => {
-                metadata.polarizations = vec!["VV".to_string(), "VH".to_string()];
-                // Load both VV and VH data for operations
-                if let Some(path) = vv_path {
-                    info!("Loading VV polarization data");
-                    vv_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                } else {
-                    return Err(SafeError::MissingField("VV measurement file"));
-                }
-
-                if let Some(path) = vh_path {
-                    info!("Loading VH polarization data");
-                    vh_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                } else {
-                    return Err(SafeError::MissingField("VH measurement file"));
-                }
-            }
-            Some("hh_hv_pair") => {
-                metadata.polarizations = vec!["HH".to_string(), "HV".to_string()];
-                // Load both HH and HV data for operations
-                if let Some(path) = hh_path {
-                    info!("Loading HH polarization data");
-                    hh_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                } else {
-                    return Err(SafeError::MissingField("HH measurement file"));
-                }
-
-                if let Some(path) = hv_path {
-                    info!("Loading HV polarization data");
-                    hv_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                } else {
-                    return Err(SafeError::MissingField("HV measurement file"));
-                }
-            }
-            Some("all_pairs") => {
-                metadata.polarizations = vec![
-                    "VV".to_string(),
-                    "VH".to_string(),
-                    "HH".to_string(),
-                    "HV".to_string(),
-                ];
-                // Load all available polarization data for operations
-                if let Some(path) = vv_path {
-                    info!("Loading VV polarization data");
-                    vv_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                }
-                if let Some(path) = vh_path {
-                    info!("Loading VH polarization data");
-                    vh_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                }
-                if let Some(path) = hh_path {
-                    info!("Loading HH polarization data");
-                    hh_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                }
-                if let Some(path) = hv_path {
-                    info!("Loading HV polarization data");
-                    hv_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                }
-            }
-            Some(unsupported) => {
-                return Err(SafeError::Parse(format!(
-                    "Unsupported polarization: {}",
-                    unsupported
-                )));
-            }
-        }
-
-        Ok(SafeReader {
-            base_path: base,
-            metadata,
-            product_type,
-            vv_data,
-            vh_data,
-            hh_data,
-            hv_data,
-        })
     }
 
     /// Open and parse a SAFE directory with warnings instead of errors for unsupported products
     /// This is useful for batch processing where you want to continue processing other files
     pub fn open_with_warnings<P: AsRef<Path>>(
         safe_dir: P,
-        polarization: Option<&str>,
+        polarization: Polarization,
     ) -> Result<Option<Self>, SafeError> {
         Self::open_with_warnings_with_options(safe_dir, polarization, None, None, None)
     }
@@ -653,213 +575,12 @@ impl SafeReader {
     /// Open and parse a SAFE directory with warnings and optional reprojection and target-size downsampling
     pub fn open_with_warnings_with_options<P: AsRef<Path>>(
         safe_dir: P,
-        polarization: Option<&str>,
+        polarization: Polarization,
         target_crs: Option<TargetCrsArg>,
         resample_alg: Option<ResampleAlg>,
         target_size: Option<usize>,
     ) -> Result<Option<Self>, SafeError> {
-        use super::discovery::identify_polarization_files;
-        use super::data_loader::load_polarization_data_with_options;
-        use super::manifest_parser::parse_comprehensive_metadata;
-        use super::crs_utils::resolve_auto_target_crs;
-        use tracing::warn;
-
-        let base = safe_dir.as_ref().to_path_buf();
-        let annotation = base.join("annotation");
-        let measurement = base.join("measurement");
-        if !annotation.is_dir() {
-            return Err(SafeError::MissingField("annotation directory"));
-        }
-        if !measurement.is_dir() {
-            return Err(SafeError::MissingField("measurement directory"));
-        }
-
-        let mut metadata = parse_comprehensive_metadata(&base)?;
-
-        let product_type = match metadata.product_type.to_uppercase().as_str() {
-            "GRD" => ProductType::GRD,
-            unsupported => {
-                warn!(
-                    "Skipping unsupported product type: {} (file: {:?})",
-                    unsupported, base
-                );
-                return Ok(None); // Return None instead of error for unsupported products
-            }
-        };
-
-        let (vv_path, vh_path, hh_path, hv_path) =
-            identify_polarization_files(&measurement, &metadata.polarizations)?;
-
-        // Resolve effective target CRS exactly once per product
-        let effective_target_crs: Option<String> = match target_crs {
-            Some(TargetCrsArg::Custom(s)) => Some(s),
-            Some(TargetCrsArg::None) => None,
-            Some(TargetCrsArg::Auto) => resolve_auto_target_crs(&base),
-            None => None,
-        };
-
-        let mut vv_data = None;
-        let mut vh_data = None;
-        let mut hh_data = None;
-        let mut hv_data = None;
-
-        match polarization {
-            Some("vv") | None => {
-                metadata.polarizations = vec!["VV".to_string()];
-                if let Some(path) = vv_path {
-                    info!("Loading VV polarization data");
-                    vv_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                } else {
-                    warn!("VV measurement file not found, skipping product");
-                    return Ok(None);
-                }
-            }
-            Some("vh") => {
-                metadata.polarizations = vec!["VH".to_string()];
-                if let Some(path) = vh_path {
-                    info!("Loading VH polarization data");
-                    vh_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                } else {
-                    warn!("VH measurement file not found, skipping product");
-                    return Ok(None);
-                }
-            }
-            Some("hh") => {
-                metadata.polarizations = vec!["HH".to_string()];
-                if let Some(path) = hh_path {
-                    info!("Loading HH polarization data");
-                    hh_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                } else {
-                    warn!("HH measurement file not found, skipping product");
-                    return Ok(None);
-                }
-            }
-            Some("hv") => {
-                metadata.polarizations = vec!["HV".to_string()];
-                if let Some(path) = hv_path {
-                    info!("Loading HV polarization data");
-                    hv_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                } else {
-                    warn!("HV measurement file not found, skipping product");
-                    return Ok(None);
-                }
-            }
-            Some("multiband") | Some("vv_vh_pair") | Some("all_pairs") => {
-                if let Some(path) = vv_path {
-                    info!("Loading VV polarization data");
-                    vv_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                }
-                if let Some(path) = vh_path {
-                    info!("Loading VH polarization data");
-                    vh_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                }
-                if let Some(path) = hh_path {
-                    info!("Loading HH polarization data");
-                    hh_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                }
-                if let Some(path) = hv_path {
-                    info!("Loading HV polarization data");
-                    hv_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                }
-                if vv_data.is_none() && vh_data.is_none() && hh_data.is_none() && hv_data.is_none()
-                {
-                    warn!("No polarization files found, skipping product");
-                    return Ok(None);
-                }
-            }
-            Some("hh_hv_pair") => {
-                if let Some(path) = hh_path {
-                    info!("Loading HH polarization data");
-                    hh_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                } else {
-                    warn!("HH measurement file not found, skipping product");
-                    return Ok(None);
-                }
-                if let Some(path) = hv_path {
-                    info!("Loading HV polarization data");
-                    hv_data = Some(load_polarization_data_with_options(
-                        &path,
-                        &mut metadata,
-                        effective_target_crs.as_deref(),
-                        resample_alg,
-                        target_size,
-                    )?);
-                } else {
-                    warn!("HV measurement file not found, skipping product");
-                    return Ok(None);
-                }
-            }
-            Some(unsupported) => {
-                warn!(
-                    "Unsupported polarization: {}, skipping product",
-                    unsupported
-                );
-                return Ok(None);
-            }
-        }
-
-        Ok(Some(SafeReader {
-            base_path: base,
-            metadata,
-            product_type,
-            vv_data,
-            vh_data,
-            hh_data,
-            hv_data,
-        }))
+        let base = safe_dir.as_ref();
+        Self::open_dir_internal(base, polarization, target_crs, resample_alg, target_size, true)
     }
 }

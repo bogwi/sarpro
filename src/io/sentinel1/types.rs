@@ -13,7 +13,7 @@ pub enum TargetCrsArg {
 }
 
 /// Metadata extracted from SAFE
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SafeMetadata {
     // Basic product information
     pub instrument: String,

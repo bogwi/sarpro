@@ -36,15 +36,7 @@ fn bitdepth_arg_to_bitdepth(arg: BitDepthArg) -> BitDepth {
     }
 }
 
-fn pol_to_reader_hint(pol: &Polarization) -> Option<&'static str> {
-    match pol {
-        Polarization::Vv => Some("vv"),
-        Polarization::Vh => Some("vh"),
-        Polarization::Hh => Some("hh"),
-        Polarization::Hv => Some("hv"),
-        Polarization::Multiband | Polarization::OP(_) => Some("all_pairs"),
-    }
-}
+
 
 /// Result of in-memory processing
 #[derive(Debug, Clone)]
@@ -73,7 +65,7 @@ pub fn process_safe_to_buffer(
 ) -> Result<ProcessedImage> {
     let reader = SafeReader::open_with_options(
         input,
-        pol_to_reader_hint(&polarization),
+        polarization,
         None,
         None,
         target_size,
@@ -383,7 +375,7 @@ pub fn process_safe_to_buffer_with_mode(
 ) -> Result<ProcessedImage> {
     let reader = SafeReader::open_with_options(
         input,
-        pol_to_reader_hint(&polarization),
+        polarization,
         None,
         None,
         target_size,
@@ -501,7 +493,7 @@ pub fn process_directory_to_path(
 
         match SafeReader::open_with_warnings_with_options(
             &path,
-            pol_to_reader_hint(&params.polarization),
+            params.polarization,
             target_arg,
             resample_alg,
             params.size,
@@ -558,7 +550,7 @@ pub fn process_safe_to_path(input: &Path, output: &Path, params: &ProcessingPara
 
     let reader = SafeReader::open_with_options(
         input,
-        pol_to_reader_hint(&params.polarization),
+        params.polarization,
         target_arg,
         resample_alg,
         params.size,
@@ -709,7 +701,7 @@ pub fn process_safe_with_options(
 ) -> Result<()> {
     let reader = SafeReader::open_with_options(
         input,
-        pol_to_reader_hint(&polarization),
+        polarization,
         None,
         None,
         size,
@@ -892,7 +884,7 @@ pub fn load_polarization(
         _ => {}
     }
 
-    let reader = SafeReader::open_with_options(input, pol_to_reader_hint(&pol), None, None, None)?;
+    let reader = SafeReader::open_with_options(input, pol, None, None, None)?;
     let data_ref: &Array2<f32> = match pol {
         Polarization::Vv => reader.vv_data()?,
         Polarization::Vh => reader.vh_data()?,
@@ -908,7 +900,7 @@ pub fn load_operation(
     input: &Path,
     op: PolarizationOperation,
 ) -> Result<(Array2<f32>, SafeMetadata)> {
-    let reader = SafeReader::open_with_options(input, Some("all_pairs"), None, None, None)?;
+    let reader = SafeReader::open_with_options(input, Polarization::Multiband, None, None, None)?;
 
     // Prefer VV/VH if both available, otherwise HH/HV
     if reader.vv_data().is_ok() && reader.vh_data().is_ok() {

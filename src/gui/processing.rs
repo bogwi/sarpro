@@ -163,16 +163,8 @@ impl SarproGui {
         // Autoscale strategy now passed as typed enum directly
         trace!("Autoscale strategy: {:?}", autoscale);
 
-        // Convert polarization enum to string for SafeReader
-        let polarization_str = match polarization {
-            Polarization::Vv => None, // Default
-            Polarization::Vh => Some("vh"),
-            Polarization::Hh => Some("hh"),
-            Polarization::Hv => Some("hv"),
-            // For multiband and operations, we'll load all available pairs and let the processing logic decide
-            Polarization::Multiband | Polarization::OP(_) => Some("all_pairs"),
-        };
-        debug!("Polarization string: {:?}", polarization_str);
+        // Use polarization enum directly
+        debug!("Polarization enum: {:?}", polarization);
 
         // Parse size parameter
         let target_size = if size == "original" {
@@ -215,7 +207,7 @@ impl SarproGui {
                     };
                     match SafeReader::open_with_warnings_with_options(
                         input,
-                        polarization_str,
+                        polarization,
                         target_arg,
                         resample,
                         target_size,
@@ -252,7 +244,7 @@ impl SarproGui {
                     };
                     let reader = SafeReader::open_with_options(
                         input,
-                        polarization_str,
+                        polarization,
                         target_arg,
                         resample,
                         target_size,
