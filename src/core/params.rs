@@ -67,6 +67,7 @@ pub struct ProcessingOptions {
     pub cog: CogOptions,
     pub stac: StacOptions,
     pub io: IoOptions,
+    pub http: HttpOptions,
 }
 
 impl Default for ProcessingOptions {
@@ -91,6 +92,7 @@ impl Default for ProcessingOptions {
             cog: CogOptions::default(),
             stac: StacOptions::default(),
             io: IoOptions::default(),
+            http: HttpOptions::default(),
         }
     }
 }
@@ -118,6 +120,7 @@ impl ProcessingOptions {
             cog: CogOptions::default(),
             stac: StacOptions::default(),
             io: IoOptions::default(),
+            http: HttpOptions::default(),
         }
     }
 }
@@ -209,10 +212,47 @@ impl Default for StacOptions {
 pub struct IoOptions {
     pub remote: bool,
     pub cache_dir: Option<PathBuf>,
+    pub zip_strategy: ZipStrategy,
 }
 
 impl Default for IoOptions {
     fn default() -> Self {
-        Self { remote: false, cache_dir: None }
+        Self { remote: false, cache_dir: None, zip_strategy: ZipStrategy::Stream }
+    }
+}
+
+/// Controls how remote SAFE ZIPs are accessed.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ZipStrategy {
+    /// Materialize remote ZIPs into a local cache directory, then open locally.
+    Materialize,
+    /// Stream remote ZIPs via VSIZIP+VSICURL without local materialization.
+    Stream,
+}
+
+impl IoOptions {
+    /// Recompute `zip_strategy` from the presence of `cache_dir`.
+    pub fn compute_zip_strategy(&mut self) {
+        self.zip_strategy = if self.cache_dir.is_some() {
+            ZipStrategy::Materialize
+        } else {
+            ZipStrategy::Stream
+        };
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HttpOptions {
+    /// HTTP timeout in seconds applied to remote requests (GDAL HTTP timeout)
+    pub timeout_s: u64,
+    /// Number of retries for transient HTTP errors (5xx/429)
+    pub retries: u8,
+    /// Base backoff in milliseconds between retries
+    pub backoff_ms: u64,
+}
+
+impl Default for HttpOptions {
+    fn default() -> Self {
+        Self { timeout_s: 120, retries: 3, backoff_ms: 500 }
     }
 }

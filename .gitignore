@@ -28,6 +28,10 @@ data/
 # === Dev files===
 .dev/
 
+# === Credentials ===
+.env
+.s1auth/
+
 # === Misc ===
 *.log
 *.bak
