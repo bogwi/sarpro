@@ -30,8 +30,15 @@ pub fn build_processing_options_from_args(args: &CliArgs) -> ProcessingOptions {
         || args.vh_url.is_some()
         || args.hh_url.is_some()
         || args.hv_url.is_some()
-        || opts.stac.in_path.is_some();
+        || opts.stac.in_path.is_some()
+        || args.input_list.is_some();
     opts.io.cache_dir = args.remote_cache_dir.clone();
+    // Derive zip strategy from presence of cache dir
+    opts.io.compute_zip_strategy();
+    // Map HTTP runtime options
+    opts.http.timeout_s = args.http_timeout;
+    opts.http.retries = args.http_retries as u8;
+    opts.http.backoff_ms = args.http_backoff_ms;
 
     opts
 }

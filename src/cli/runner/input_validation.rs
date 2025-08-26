@@ -9,8 +9,9 @@ pub fn validate_input_modes(args: &CliArgs) -> Result<(), AppError> {
     if args.safe_zip_url.is_some() { selected_modes += 1; }
     if args.vv_url.is_some() || args.vh_url.is_some() || args.hh_url.is_some() || args.hv_url.is_some() { selected_modes += 1; }
     if args.safe_zip_dir_url.is_some() { selected_modes += 1; }
+    if args.input_list.is_some() { selected_modes += 1; }
     if selected_modes > 1 {
-        return Err(AppError::MissingArgument { arg: "Select exactly one input mode (legacy --input/--input-dir OR one of: --stac-item | --safe-zip-url | --safe-zip-dir-url | --*-url)".to_string() });
+        return Err(AppError::MissingArgument { arg: "Select exactly one input mode (legacy --input/--input-dir OR one of: --stac-item | --safe-zip-url | --safe-zip-dir-url | --*-url | --input-list)".to_string() });
     }
     Ok(())
 }

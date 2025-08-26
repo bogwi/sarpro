@@ -99,6 +99,10 @@ pub struct CliArgs {
     #[arg(long = "hv-url")]
     pub hv_url: Option<String>,
 
+    /// Newline-separated list of inputs (STAC Items, SAFE ZIP URLs, local SAFE paths, or direct band URLs)
+    #[arg(long = "input-list")]
+    pub input_list: Option<PathBuf>,
+
     /// OAuth bearer token to access authenticated endpoints (mapped to GDAL headers later)
     #[arg(long = "auth-bearer")]
     pub auth_bearer: Option<String>,
@@ -118,8 +122,9 @@ pub struct CliArgs {
     /// Optional directory for remote cache/materialization
     #[arg(long = "remote-cache-dir")]
     pub remote_cache_dir: Option<PathBuf>,
-
-    /// Remote cache mode: stream (default) or materialize
-    #[arg(long = "remote-cache-mode", default_value = "stream")]
-    pub remote_cache_mode: String,
+    
+    /// Maximum number of concurrent entries to process when using --input-list
+    #[arg(long = "max-concurrent")]
+    pub max_concurrent: Option<usize>,
+    
 }
