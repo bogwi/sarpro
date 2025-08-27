@@ -8,3 +8,6 @@ pub mod gdal;
 pub use gdal::{GdalError, GdalMetadata, GdalSarReader};
 
 pub mod writers;
+
+pub mod credentials;
+pub mod cache;

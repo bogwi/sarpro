@@ -9,6 +9,8 @@ use sarpro::core::processing::save::{
 use sarpro::io::sentinel1::TargetCrsArg;
 use sarpro::io::gdal::to_gdal_path;
 use sarpro::io::SafeReader;
+use sarpro::io::credentials::{CdseProvider, CredentialProvider};
+use sarpro::io::cache::{CacheEntry, load_index, save_index, get_url as cache_get_url, get_alias as cache_get_alias, put_url as cache_put_url, put_alias as cache_put_alias};
 use sarpro::types::{AutoscaleStrategy, BitDepth, OutputFormat, ProcessingOperation, SyntheticRgbMode};
 use sarpro::{BitDepthArg, Polarization, PolarizationOperation};
 
@@ -148,14 +150,6 @@ fn resolve_polarization_and_save_image(
     Ok(())
 }
 
-// Public-only headers provider for Step 3; Step 3.1 will plug real credentials
-trait HeadersProvider {
-    fn headers_for(&self, _url: &str) -> Vec<(String, String)> { Vec::new() }
-}
-
-struct NoAuthHeaders;
-impl HeadersProvider for NoAuthHeaders {}
-
 fn materialize_zip_if_requested(
     zip_href: &str,
     cache_dir: &Option<PathBuf>,
@@ -170,20 +164,55 @@ fn materialize_zip_if_requested(
     let cache_dir = cache_dir.as_ref().unwrap();
     fs::create_dir_all(cache_dir)?;
 
-    // Derive a filename from the URL/path last segment
-    let fname = if zip_href.contains('/') { zip_href.rsplit('/').next().unwrap_or("remote.SAFE.zip") } else { "remote.SAFE.zip" };
-    let local_path = cache_dir.join(fname);
+    // Load cache index
+    let mut index = load_index(cache_dir);
 
-    // If the href is already a local path, just copy/link it
-    if Path::new(zip_href).exists() {
-        // If destination exists, reuse; otherwise copy
-        if !local_path.exists() {
-            fs::copy(zip_href, &local_path)?;
+    // Recognize CDSE OData URL and extract UUID
+    let is_cdse = zip_href.contains("download.dataspace.copernicus.eu") && zip_href.contains("/odata/") && zip_href.contains("/Products(");
+    let cdse_uuid: Option<String> = if is_cdse {
+        // extract between Products( and )
+        let mut uuid_opt: Option<String> = None;
+        if let Some(start_idx) = zip_href.find("Products(") {
+            let s = &zip_href[start_idx + 9..];
+            if let Some(end_idx) = s.find(')') {
+                uuid_opt = Some(s[..end_idx].to_string());
+            }
         }
-        return Ok(local_path.to_string_lossy().to_string());
+        uuid_opt
+    } else { None };
+
+    // Normalize CDSE download URL to include /$value
+    let download_url: String = if is_cdse {
+        if zip_href.ends_with("/$value") { zip_href.to_string() } else { format!("{}/$value", zip_href.trim_end_matches('/')) }
+    } else {
+        zip_href.to_string()
+    };
+
+    // Quick cache hit by URL
+    if let Some(entry) = cache_get_url(&index, zip_href) {
+        if entry.local_path.exists() {
+            info!("Cache hit (by URL): using materialized ZIP {:?}", entry.local_path);
+            return Ok(entry.local_path.to_string_lossy().to_string());
+        }
+    }
+    // Also check normalized download URL
+    if let Some(entry) = cache_get_url(&index, &download_url) {
+        if entry.local_path.exists() {
+            info!("Cache hit (by normalized URL): using materialized ZIP {:?}", entry.local_path);
+            return Ok(entry.local_path.to_string_lossy().to_string());
+        }
+    }
+    // Quick cache hit by CDSE UUID alias
+    if let Some(uuid) = cdse_uuid.as_ref() {
+        if let Some(entry) = cache_get_alias(&index, "cdse", uuid) {
+            if entry.local_path.exists() {
+                info!("Cache hit (by alias cdse:{}): using materialized ZIP {:?}", uuid, entry.local_path);
+                return Ok(entry.local_path.to_string_lossy().to_string());
+            }
+        }
     }
 
-    // Use reqwest blocking client with simple retries and atomic write
+    // Build HTTP client
     let client = reqwest::blocking::Client::builder()
         .gzip(true)
         .brotli(true)
@@ -192,29 +221,142 @@ fn materialize_zip_if_requested(
         .build()
         .map_err(|e| AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("http client build error: {}", e) })?;
 
+    // Prepare CredentialProvider for CDSE
+    let mut cdse = if is_cdse { Some(CdseProvider::new(http_timeout_s)) } else { None };
+    if let Some(provider) = cdse.as_mut() {
+        // Best-effort prepare; if missing creds, HEAD/GET may fail and will surface clearly
+        let _ = provider.prepare();
+    }
+
+    // Preflight HEAD to discover Content-Length / ETag / Content-Disposition / Range support
+    let mut head_req = client.head(&download_url);
+    if let Some(provider) = cdse.as_ref() {
+        if let Ok(hmap) = provider.headers_for(&download_url) {
+            for (k, v) in hmap { head_req = head_req.header(k, v); }
+        }
+    }
+    let (content_len_opt, etag_opt, accept_ranges_bytes, cd_filename_opt) = match head_req.send() {
+        Ok(resp) if resp.status().is_success() => {
+            let content_len = resp.headers().get(reqwest::header::CONTENT_LENGTH)
+                .and_then(|h| h.to_str().ok())
+                .and_then(|s| s.parse::<u64>().ok());
+            let etag = resp.headers().get(reqwest::header::ETAG)
+                .and_then(|h| h.to_str().ok())
+                .map(|s| s.to_string());
+            let accept_ranges = resp.headers().get(reqwest::header::ACCEPT_RANGES)
+                .and_then(|h| h.to_str().ok())
+                .map(|v| v.eq_ignore_ascii_case("bytes")).unwrap_or(false);
+            // Parse Content-Disposition filename
+            let cd_filename = resp.headers().get("content-disposition")
+                .and_then(|h| h.to_str().ok())
+                .and_then(|cd| {
+                    // look for filename= or filename*= (take simple filename= first)
+                    let lower = cd.to_string();
+                    let mut fname: Option<String> = None;
+                    for part in lower.split(';') {
+                        let p = part.trim();
+                        if let Some(eq) = p.find("filename=") {
+                            let val = p[eq+9..].trim().trim_matches('"');
+                            if !val.is_empty() { fname = Some(val.to_string()); break; }
+                        }
+                    }
+                    fname
+                });
+            (content_len, etag, accept_ranges, cd_filename)
+        }
+        _ => (None, None, false, None),
+    };
+
+    // If CDSE and no Content-Disposition filename, try OData metadata Name
+    let mut canonical_name: Option<String> = cd_filename_opt;
+    if canonical_name.is_none() {
+        if cdse_uuid.is_some() {
+            if let Some(provider) = cdse.as_ref() {
+                let base_meta = if download_url.ends_with("/$value") { &download_url[..download_url.len()-"/$value".len()] } else { zip_href };
+                let meta_url = format!("{}?$select=Name", base_meta);
+                let mut req = client.get(&meta_url);
+                if let Ok(hmap) = provider.headers_for(&meta_url) {
+                    for (k, v) in hmap { req = req.header(k, v); }
+                }
+                if let Ok(resp) = req.send() {
+                    if resp.status().is_success() {
+                        if let Ok(json) = resp.json::<serde_json::Value>() {
+                            if let Some(name) = json.get("Name").and_then(|v| v.as_str()) {
+                                let mut fname = name.to_string();
+                                if fname.to_lowercase().ends_with(".safe.zip") {
+                                    canonical_name = Some(fname);
+                                } else if fname.to_lowercase().ends_with(".safe") {
+                                    fname.push_str(".zip");
+                                    canonical_name = Some(fname);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback canonical name
+    if canonical_name.is_none() {
+        if let Some(uuid) = cdse_uuid.as_ref() {
+            canonical_name = Some(format!("{}.zip", uuid));
+        } else {
+            // Derive from URL tail as last resort
+            let tail_opt = if zip_href.contains('/') { Some(zip_href.rsplit('/').next().unwrap_or("remote.SAFE.zip")) } else { None };
+            let fname = match tail_opt { Some(t) if !t.is_empty() => t.to_string(), _ => "remote.SAFE.zip".to_string() };
+            canonical_name = Some(fname);
+        }
+    }
+    if canonical_name.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+        canonical_name = Some("remote.SAFE.zip".to_string());
+    }
+    let local_path = cache_dir.join(canonical_name.as_ref().unwrap());
+
+    // If the href is already a local path, just copy/link it
+    if Path::new(zip_href).exists() {
+        // If destination exists, reuse; otherwise copy
+        if !local_path.exists() {
+            fs::copy(zip_href, &local_path)?;
+        }
+        // Update index (by URL and alias if applicable)
+        let entry = CacheEntry { local_path: local_path.clone(), etag: None, content_length: None };
+        cache_put_url(&mut index, zip_href, entry.clone());
+        cache_put_url(&mut index, &download_url, entry.clone());
+        if let Some(uuid) = cdse_uuid.as_ref() { cache_put_alias(&mut index, "cdse", uuid, entry.clone()); }
+        save_index(cache_dir, &index);
+        return Ok(local_path.to_string_lossy().to_string());
+    }
+
+    // If the canonical file already exists and (when known) size matches, reuse
+    // Pre-download cache hit using the canonical filename. It verifies size when HEAD provided Content-Length, updates the cache index (by original URL, normalized $value URL, and cdse:UUID alias), logs the hit, and returns the local path without downloading.
+    if local_path.exists() {
+        if let Ok(md) = std::fs::metadata(&local_path) {
+            if let Some(cl) = content_len_opt {
+                if md.len() == cl {
+                    let entry = CacheEntry { local_path: local_path.clone(), etag: etag_opt.clone(), content_length: content_len_opt };
+                    cache_put_url(&mut index, zip_href, entry.clone());
+                    cache_put_url(&mut index, &download_url, entry.clone());
+                    if let Some(uuid) = cdse_uuid.as_ref() { cache_put_alias(&mut index, "cdse", uuid, entry.clone()); }
+                    save_index(cache_dir, &index);
+                    info!("Cache hit: using materialized ZIP {:?} ({} bytes)", local_path, md.len());
+                    return Ok(local_path.to_string_lossy().to_string());
+                }
+            } else {
+                let entry = CacheEntry { local_path: local_path.clone(), etag: etag_opt.clone(), content_length: content_len_opt };
+                cache_put_url(&mut index, zip_href, entry.clone());
+                cache_put_url(&mut index, &download_url, entry.clone());
+                if let Some(uuid) = cdse_uuid.as_ref() { cache_put_alias(&mut index, "cdse", uuid, entry.clone()); }
+                save_index(cache_dir, &index);
+                info!("Cache hit: using materialized ZIP {:?}", local_path);
+                return Ok(local_path.to_string_lossy().to_string());
+            }
+        }
+    }
+
     // Sidecars and resume state
     let partial = local_path.with_extension("partial");
     let etag_sidecar = local_path.with_extension("etag");
-
-    // Preflight HEAD for Content-Length/ETag (best-effort)
-    let mut head_req = client.head(zip_href);
-    for (k, v) in NoAuthHeaders.headers_for(zip_href) { head_req = head_req.header(&k, &v); }
-    let (content_len_opt, etag_opt, accept_ranges_bytes) = match head_req.send() {
-        Ok(resp) if resp.status().is_success() => {
-            (
-                resp.headers().get(reqwest::header::CONTENT_LENGTH)
-                    .and_then(|h| h.to_str().ok())
-                    .and_then(|s| s.parse::<u64>().ok()),
-                resp.headers().get(reqwest::header::ETAG)
-                    .and_then(|h| h.to_str().ok())
-                    .map(|s| s.to_string()),
-                resp.headers().get(reqwest::header::ACCEPT_RANGES)
-                    .and_then(|h| h.to_str().ok())
-                    .map(|v| v.eq_ignore_ascii_case("bytes")).unwrap_or(false),
-            )
-        }
-        _ => (None, None, false),
-    };
 
     // If complete file exists and content length matches (when known), reuse
     if local_path.exists() {
@@ -234,6 +376,7 @@ fn materialize_zip_if_requested(
 
     // Determine resume position
     let mut resume_from: u64 = 0;
+    let accept_ranges_bytes = accept_ranges_bytes; // keep name
     if partial.exists() && accept_ranges_bytes {
         if let Ok(md) = std::fs::metadata(&partial) { resume_from = md.len(); }
         // ETag guard: if sidecar exists and new ETag differs, restart
@@ -276,18 +419,21 @@ fn materialize_zip_if_requested(
     let max_retries = http_retries.max(1);
     loop {
         attempts += 1;
-        let mut req = client.get(zip_href);
-        // no-auth headers for Step 3 (empty)
-        for (k, v) in NoAuthHeaders.headers_for(zip_href) { req = req.header(&k, &v); }
+        let mut req = client.get(&download_url);
+        if let Some(provider) = cdse.as_ref() {
+            if let Ok(hmap) = provider.headers_for(&download_url) {
+                for (k, v) in hmap { req = req.header(k, v); }
+            }
+        }
         if resume_from > 0 { req = req.header(reqwest::header::RANGE, format!("bytes={}-", resume_from)); }
         let resp = req.send();
         match resp {
             Ok(r) if r.status().is_success() => {
                 let mut body = r
                     .error_for_status()
-                    .map_err(|e| AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("http status error: {}", e) })?;
+                    .map_err(|e| AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("http status error: {}", e) })?;
                 let copied = std::io::copy(&mut body, &mut file)
-                    .map_err(|e| AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("write error: {}", e) })?;
+                    .map_err(|e| AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("write error: {}", e) })?;
                 let _ = file.sync_all();
                 // Verify length when known
                 if let Some(total) = content_len_opt { 
@@ -295,25 +441,31 @@ fn materialize_zip_if_requested(
                     if have != total { 
                         // allow retry
                         if attempts < max_retries { std::thread::sleep(std::time::Duration::from_millis(http_backoff_ms * attempts as u64)); continue; }
-                        return Err(AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("size mismatch: have {}, want {} (copied {})", have, total, copied) }.into());
+                        return Err(AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("size mismatch: have {}, want {} (copied {})", have, total, copied) }.into());
                     }
                 }
                 std::fs::rename(&partial, &local_path)
-                    .map_err(|e| AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("rename error: {}", e) })?;
+                    .map_err(|e| AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("rename error: {}", e) })?;
                 let final_len = std::fs::metadata(&local_path).ok().map(|m| m.len()).unwrap_or(0);
                 info!("Cached ZIP ready: {:?} ({} bytes)", local_path, final_len);
+                // Update index with URL and alias
+                let entry = CacheEntry { local_path: local_path.clone(), etag: etag_opt.clone(), content_length: content_len_opt };
+                cache_put_url(&mut index, zip_href, entry.clone());
+                cache_put_url(&mut index, &download_url, entry.clone());
+                if let Some(uuid) = cdse_uuid.as_ref() { cache_put_alias(&mut index, "cdse", uuid, entry.clone()); }
+                save_index(cache_dir, &index);
                 return Ok(local_path.to_string_lossy().to_string());
             }
             Ok(r) if r.status().as_u16() >= 500 || r.status().as_u16() == 429 => {
                 if attempts < max_retries { std::thread::sleep(std::time::Duration::from_millis(http_backoff_ms * attempts as u64)); continue; }
-                return Err(AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("http error {} after retries", r.status()) }.into());
+                return Err(AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("http error {} after retries", r.status()) }.into());
             }
             Ok(r) => {
-                return Err(AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("http error {}", r.status()) }.into());
+                return Err(AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("http error {}", r.status()) }.into());
             }
             Err(e) => {
                 if attempts < max_retries { std::thread::sleep(std::time::Duration::from_millis(http_backoff_ms * attempts as u64)); continue; }
-                return Err(AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("network error: {}", e) }.into());
+                return Err(AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("network error: {}", e) }.into());
             }
         }
     }
