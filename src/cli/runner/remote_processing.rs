@@ -235,7 +235,7 @@ fn materialize_zip_if_requested(
             for (k, v) in hmap { head_req = head_req.header(k, v); }
         }
     }
-    let (content_len_opt, etag_opt, accept_ranges_bytes, cd_filename_opt) = match head_req.send() {
+    let (content_len_opt, etag_opt, accept_ranges_header_log, cd_filename_opt) = match head_req.send() {
         Ok(resp) if resp.status().is_success() => {
             let content_len = resp.headers().get(reqwest::header::CONTENT_LENGTH)
                 .and_then(|h| h.to_str().ok())
@@ -243,9 +243,11 @@ fn materialize_zip_if_requested(
             let etag = resp.headers().get(reqwest::header::ETAG)
                 .and_then(|h| h.to_str().ok())
                 .map(|s| s.to_string());
-            let accept_ranges = resp.headers().get(reqwest::header::ACCEPT_RANGES)
+            // Check Accept-Ranges header for logging (we don't rely on it for resume decisions)
+            let accept_ranges_header = resp.headers().get(reqwest::header::ACCEPT_RANGES)
                 .and_then(|h| h.to_str().ok())
-                .map(|v| v.eq_ignore_ascii_case("bytes")).unwrap_or(false);
+                .unwrap_or("not advertised")
+                .to_string();
             // Parse Content-Disposition filename
             let cd_filename = resp.headers().get("content-disposition")
                 .and_then(|h| h.to_str().ok())
@@ -262,9 +264,9 @@ fn materialize_zip_if_requested(
                     }
                     fname
                 });
-            (content_len, etag, accept_ranges, cd_filename)
+            (content_len, etag, accept_ranges_header, cd_filename)
         }
-        _ => (None, None, false, None),
+        _ => (None, None, "unknown".to_string(), None),
     };
 
     // If CDSE and no Content-Disposition filename, try OData metadata Name
@@ -375,25 +377,29 @@ fn materialize_zip_if_requested(
     }
 
     // Determine resume position
+    // Always try to resume if partial file exists (following wget/curl approach)
     let mut resume_from: u64 = 0;
-    let accept_ranges_bytes = accept_ranges_bytes; // keep name
-    if partial.exists() && accept_ranges_bytes {
-        if let Ok(md) = std::fs::metadata(&partial) { resume_from = md.len(); }
-        // ETag guard: if sidecar exists and new ETag differs, restart
-        if etag_sidecar.exists() {
-            if let (Ok(old), Some(new)) = (std::fs::read_to_string(&etag_sidecar), etag_opt.as_ref()) {
-                if old.trim() != new.trim() {
-                    info!("Partial invalidated due to ETag change; restarting download for {}", zip_href);
-                    let _ = std::fs::remove_file(&partial);
-                    let _ = std::fs::remove_file(&etag_sidecar);
-                    resume_from = 0;
+    let should_attempt_resume = partial.exists();
+
+    if should_attempt_resume {
+        if let Ok(md) = std::fs::metadata(&partial) {
+            resume_from = md.len();
+            // ETag guard: if sidecar exists and new ETag differs, restart
+            if etag_sidecar.exists() {
+                if let (Ok(old), Some(new)) = (std::fs::read_to_string(&etag_sidecar), etag_opt.as_ref()) {
+                    if old.trim() != new.trim() {
+                        info!("Partial invalidated due to ETag change; restarting download for {}", zip_href);
+                        let _ = std::fs::remove_file(&partial);
+                        let _ = std::fs::remove_file(&etag_sidecar);
+                        resume_from = 0;
+                    }
                 }
             }
+            if resume_from > 0 {
+                info!("Will attempt to resume download from {} bytes (Accept-Ranges: {})",
+                      resume_from, accept_ranges_header_log);
+            }
         }
-    } else {
-        // Clean stale partial if cannot resume
-        let _ = std::fs::remove_file(&partial);
-        resume_from = 0;
     }
 
     // Store ETag sidecar for future resume
@@ -425,7 +431,10 @@ fn materialize_zip_if_requested(
                 for (k, v) in hmap { req = req.header(k, v); }
             }
         }
-        if resume_from > 0 { req = req.header(reqwest::header::RANGE, format!("bytes={}-", resume_from)); }
+        // Always send Range header if we have a resume position (server will ignore if unsupported)
+        if resume_from > 0 {
+            req = req.header(reqwest::header::RANGE, format!("bytes={}-", resume_from));
+        }
         let resp = req.send();
         match resp {
             Ok(r) if r.status().is_success() => {
@@ -436,9 +445,9 @@ fn materialize_zip_if_requested(
                     .map_err(|e| AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("write error: {}", e) })?;
                 let _ = file.sync_all();
                 // Verify length when known
-                if let Some(total) = content_len_opt { 
+                if let Some(total) = content_len_opt {
                     let have = std::fs::metadata(&partial).ok().map(|m| m.len()).unwrap_or(0);
-                    if have != total { 
+                    if have != total {
                         // allow retry
                         if attempts < max_retries { std::thread::sleep(std::time::Duration::from_millis(http_backoff_ms * attempts as u64)); continue; }
                         return Err(AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("size mismatch: have {}, want {} (copied {})", have, total, copied) }.into());
@@ -455,6 +464,29 @@ fn materialize_zip_if_requested(
                 if let Some(uuid) = cdse_uuid.as_ref() { cache_put_alias(&mut index, "cdse", uuid, entry.clone()); }
                 save_index(cache_dir, &index);
                 return Ok(local_path.to_string_lossy().to_string());
+            }
+            Ok(r) if r.status().as_u16() == 416 => {
+                // Range Not Satisfiable - server doesn't support ranges
+                // Fall back to fresh download by removing partial and restarting
+                warn!("Server doesn't support range requests (416 Range Not Satisfiable), falling back to fresh download");
+                let _ = std::fs::remove_file(&partial);
+                let _ = std::fs::remove_file(&etag_sidecar);
+                resume_from = 0;
+                // Reopen file for fresh download
+                file = std::fs::File::create(&partial)
+                    .map_err(|e| AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("recreate partial error: {}", e) })?;
+                // Retry without range header
+                continue;
+            }
+            Ok(r) if r.status().as_u16() == 400 && resume_from > 0 => {
+                // Bad Request when sending Range header - server may not support ranges
+                warn!("Server rejected range request (400 Bad Request), falling back to fresh download");
+                let _ = std::fs::remove_file(&partial);
+                let _ = std::fs::remove_file(&etag_sidecar);
+                resume_from = 0;
+                file = std::fs::File::create(&partial)
+                    .map_err(|e| AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("recreate partial error: {}", e) })?;
+                continue;
             }
             Ok(r) if r.status().as_u16() >= 500 || r.status().as_u16() == 429 => {
                 if attempts < max_retries { std::thread::sleep(std::time::Duration::from_millis(http_backoff_ms * attempts as u64)); continue; }
