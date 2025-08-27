@@ -9,11 +9,144 @@ use sarpro::core::processing::save::{
 use sarpro::io::sentinel1::TargetCrsArg;
 use sarpro::io::gdal::to_gdal_path;
 use sarpro::io::SafeReader;
-use sarpro::types::{BitDepth, OutputFormat, ProcessingOperation};
+use sarpro::types::{AutoscaleStrategy, BitDepth, OutputFormat, ProcessingOperation, SyntheticRgbMode};
 use sarpro::{BitDepthArg, Polarization, PolarizationOperation};
 
 use crate::cli::args::CliArgs;
 use crate::cli::errors::AppError;
+
+/// Helper function to process and save data based on polarization type.
+/// Eliminates code duplication by replacing repetitive match statements with conditional logic.
+fn resolve_polarization_and_save_image(
+    reader: &SafeReader,
+    polarization: Polarization,
+    output_path: &Path,
+    format: OutputFormat,
+    bit_depth: BitDepth,
+    target_size: Option<usize>,
+    synrgb_mode: SyntheticRgbMode,
+    pad: bool,
+    autoscale: AutoscaleStrategy,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Handle single band polarizations without match statements
+    if polarization == Polarization::Vv || polarization == Polarization::Vh ||
+       polarization == Polarization::Hh || polarization == Polarization::Hv {
+        let processed = if polarization == Polarization::Vv {
+            reader.vv_data()?
+        } else if polarization == Polarization::Vh {
+            reader.vh_data()?
+        } else if polarization == Polarization::Hh {
+            reader.hh_data()?
+        } else if polarization == Polarization::Hv {
+            reader.hv_data()?
+        } else {
+            unreachable!()
+        };
+
+        save_processed_image(
+            &processed,
+            output_path,
+            format,
+            bit_depth,
+            target_size,
+            Some(reader.metadata()),
+            pad,
+            autoscale,
+            ProcessingOperation::SingleBand,
+        )?
+    }
+    // Handle multiband processing
+    else if polarization == Polarization::Multiband {
+        if reader.vv_data().is_ok() && reader.vh_data().is_ok() {
+            let vv_processed = reader.vv_data()?;
+            let vh_processed = reader.vh_data()?;
+            save_processed_multiband_image_sequential(
+                &vv_processed,
+                &vh_processed,
+                output_path,
+                format,
+                bit_depth,
+                target_size,
+                Some(reader.metadata()),
+                pad,
+                autoscale,
+                ProcessingOperation::MultibandVvVh,
+                synrgb_mode,
+            )?
+        } else if reader.hh_data().is_ok() && reader.hv_data().is_ok() {
+            let hh_processed = reader.hh_data()?;
+            let hv_processed = reader.hv_data()?;
+            save_processed_multiband_image_sequential(
+                &hh_processed,
+                &hv_processed,
+                output_path,
+                format,
+                bit_depth,
+                target_size,
+                Some(reader.metadata()),
+                pad,
+                autoscale,
+                ProcessingOperation::MultibandHhHv,
+                synrgb_mode,
+            )?
+                    } else {
+                return Err(Box::new(AppError::IncompleDataPair {
+                    operation: "multiband".to_string(),
+                    available: reader.get_available_polarizations(),
+                }));
+            }
+    }
+    // Handle polarization operations
+    else if let Polarization::OP(op) = polarization {
+        let processed = if reader.vv_data().is_ok() && reader.vh_data().is_ok() {
+            if op == PolarizationOperation::Sum {
+                reader.sum_data()?
+            } else if op == PolarizationOperation::Diff {
+                reader.difference_data()?
+            } else if op == PolarizationOperation::Ratio {
+                reader.ratio_data()?
+            } else if op == PolarizationOperation::NDiff {
+                reader.normalized_diff_data()?
+            } else if op == PolarizationOperation::LogRatio {
+                reader.log_ratio_data()?
+            } else {
+                unreachable!()
+            }
+        } else if reader.hh_data().is_ok() && reader.hv_data().is_ok() {
+            if op == PolarizationOperation::Sum {
+                reader.sum_hh_hv_data()?
+            } else if op == PolarizationOperation::Diff {
+                reader.difference_hh_hv_data()?
+            } else if op == PolarizationOperation::Ratio {
+                reader.ratio_hh_hv_data()?
+            } else if op == PolarizationOperation::NDiff {
+                reader.normalized_diff_hh_hv_data()?
+            } else if op == PolarizationOperation::LogRatio {
+                reader.log_ratio_hh_hv_data()?
+            } else {
+                unreachable!()
+            }
+                    } else {
+                return Err(Box::new(AppError::IncompleDataPair {
+                    operation: polarization.to_string(),
+                    available: reader.get_available_polarizations(),
+                }));
+            };
+
+        save_processed_image(
+            &processed,
+            output_path,
+            format,
+            bit_depth,
+            target_size,
+            Some(reader.metadata()),
+            pad,
+            autoscale,
+            ProcessingOperation::PolarOp(op),
+        )?
+    }
+    Ok(())
+}
 
 // Public-only headers provider for Step 3; Step 3.1 will plug real credentials
 trait HeadersProvider {
@@ -223,99 +356,19 @@ pub fn process_safe_zip_url(args: &CliArgs) -> Result<(), Box<dyn std::error::Er
         target_size,
     )?;
 
-    // Dispatch save similar to legacy path
+    // Dispatch save using the unified helper function
     let bit_depth_enum = match args.bit_depth { BitDepthArg::U8 => BitDepth::U8, BitDepthArg::U16 => BitDepth::U16 };
-    match args.polarization {
-        Polarization::Vv | Polarization::Vh | Polarization::Hh | Polarization::Hv => {
-            let processed = match args.polarization {
-                Polarization::Vv => reader.vv_data()?,
-                Polarization::Vh => reader.vh_data()?,
-                Polarization::Hh => reader.hh_data()?,
-                Polarization::Hv => reader.hv_data()?,
-                _ => unreachable!(),
-            };
-            save_processed_image(
-                &processed,
-                output.as_path(),
-                args.format,
-                bit_depth_enum,
-                target_size,
-                Some(reader.metadata()),
-                args.pad,
-                args.autoscale,
-                ProcessingOperation::SingleBand,
-            )?
-        }
-        Polarization::Multiband => {
-            if reader.vv_data().is_ok() && reader.vh_data().is_ok() {
-                let vv_processed = reader.vv_data()?;
-                let vh_processed = reader.vh_data()?;
-                save_processed_multiband_image_sequential(
-                    &vv_processed,
-                    &vh_processed,
-                    output.as_path(),
-                    args.format,
-                    bit_depth_enum,
-                    target_size,
-                    Some(reader.metadata()),
-                    args.pad,
-                    args.autoscale,
-                    ProcessingOperation::MultibandVvVh,
-                    args.synrgb_mode,
-                )?
-            } else if reader.hh_data().is_ok() && reader.hv_data().is_ok() {
-                let hh_processed = reader.hh_data()?;
-                let hv_processed = reader.hv_data()?;
-                save_processed_multiband_image_sequential(
-                    &hh_processed,
-                    &hv_processed,
-                    output.as_path(),
-                    args.format,
-                    bit_depth_enum,
-                    target_size,
-                    Some(reader.metadata()),
-                    args.pad,
-                    args.autoscale,
-                    ProcessingOperation::MultibandHhHv,
-                    args.synrgb_mode,
-                )?
-            } else {
-                return Err(AppError::IncompleDataPair { operation: "multiband".to_string(), available: reader.get_available_polarizations() }.into());
-            }
-        }
-        Polarization::OP(op) => {
-            let processed = if reader.vv_data().is_ok() && reader.vh_data().is_ok() {
-                match op {
-                    PolarizationOperation::Sum => reader.sum_data()?,
-                    PolarizationOperation::Diff => reader.difference_data()?,
-                    PolarizationOperation::Ratio => reader.ratio_data()?,
-                    PolarizationOperation::NDiff => reader.normalized_diff_data()?,
-                    PolarizationOperation::LogRatio => reader.log_ratio_data()?,
-                }
-            } else if reader.hh_data().is_ok() && reader.hv_data().is_ok() {
-                match op {
-                    PolarizationOperation::Sum => reader.sum_hh_hv_data()?,
-                    PolarizationOperation::Diff => reader.difference_hh_hv_data()?,
-                    PolarizationOperation::Ratio => reader.ratio_hh_hv_data()?,
-                    PolarizationOperation::NDiff => reader.normalized_diff_hh_hv_data()?,
-                    PolarizationOperation::LogRatio => reader.log_ratio_hh_hv_data()?,
-                }
-            } else {
-                return Err(AppError::IncompleDataPair { operation: args.polarization.to_string(), available: reader.get_available_polarizations() }.into());
-            };
-            save_processed_image(
-                &processed,
-                output.as_path(),
-                args.format,
-                bit_depth_enum,
-                target_size,
-                Some(reader.metadata()),
-                args.pad,
-                args.autoscale,
-                ProcessingOperation::PolarOp(op),
-            )?
-        }
-    }
+    resolve_polarization_and_save_image(
+        &reader,
+        args.polarization,
+        output.as_path(),
+        args.format,
+        bit_depth_enum,
+        target_size,
+        args.synrgb_mode,
+        args.pad,
+        args.autoscale,
+    )?;
     info!("Successfully processed remote SAFE ZIP: {:?} -> {:?}", zip_url, output);
     Ok(())
 }
@@ -479,103 +532,17 @@ pub fn process_safe_zip_dir_url(args: &CliArgs) -> Result<(), Box<dyn std::error
         match reader_res {
             Ok(reader) => {
                 let bit_depth_enum = match args.bit_depth { BitDepthArg::U8 => BitDepth::U8, BitDepthArg::U16 => BitDepth::U16 };
-                let save_res = match args.polarization {
-                    Polarization::Vv | Polarization::Vh | Polarization::Hh | Polarization::Hv => {
-                        let processed = match args.polarization {
-                            Polarization::Vv => reader.vv_data(),
-                            Polarization::Vh => reader.vh_data(),
-                            Polarization::Hh => reader.hh_data(),
-                            Polarization::Hv => reader.hv_data(),
-                            _ => unreachable!(),
-                        };
-                        match processed {
-                            Ok(arr) => save_processed_image(
-                                arr,
-                                out_path.as_path(),
-                                args.format,
-                                bit_depth_enum,
-                                target_size,
-                                Some(reader.metadata()),
-                                args.pad,
-                                args.autoscale,
-                                ProcessingOperation::SingleBand,
-                            ),
-                            Err(e) => Err(e.into()),
-                        }
-                    }
-                    Polarization::Multiband => {
-                        if reader.vv_data().is_ok() && reader.vh_data().is_ok() {
-                            let vv_processed = reader.vv_data().unwrap();
-                            let vh_processed = reader.vh_data().unwrap();
-                            save_processed_multiband_image_sequential(
-                                vv_processed,
-                                vh_processed,
-                                out_path.as_path(),
-                                args.format,
-                                bit_depth_enum,
-                                target_size,
-                                Some(reader.metadata()),
-                                args.pad,
-                                args.autoscale,
-                                ProcessingOperation::MultibandVvVh,
-                                args.synrgb_mode,
-                            )
-                        } else if reader.hh_data().is_ok() && reader.hv_data().is_ok() {
-                            let hh_processed = reader.hh_data().unwrap();
-                            let hv_processed = reader.hv_data().unwrap();
-                            save_processed_multiband_image_sequential(
-                                hh_processed,
-                                hv_processed,
-                                out_path.as_path(),
-                                args.format,
-                                bit_depth_enum,
-                                target_size,
-                                Some(reader.metadata()),
-                                args.pad,
-                                args.autoscale,
-                                ProcessingOperation::MultibandHhHv,
-                                args.synrgb_mode,
-                            )
-                        } else {
-                            Err(AppError::IncompleDataPair { operation: "multiband".to_string(), available: reader.get_available_polarizations() }.into())
-                        }
-                    }
-                    Polarization::OP(op) => {
-                        let processed = if reader.vv_data().is_ok() && reader.vh_data().is_ok() {
-                            match op {
-                                PolarizationOperation::Sum => reader.sum_data(),
-                                PolarizationOperation::Diff => reader.difference_data(),
-                                PolarizationOperation::Ratio => reader.ratio_data(),
-                                PolarizationOperation::NDiff => reader.normalized_diff_data(),
-                                PolarizationOperation::LogRatio => reader.log_ratio_data(),
-                            }
-                        } else if reader.hh_data().is_ok() && reader.hv_data().is_ok() {
-                            match op {
-                                PolarizationOperation::Sum => reader.sum_hh_hv_data(),
-                                PolarizationOperation::Diff => reader.difference_hh_hv_data(),
-                                PolarizationOperation::Ratio => reader.ratio_hh_hv_data(),
-                                PolarizationOperation::NDiff => reader.normalized_diff_hh_hv_data(),
-                                PolarizationOperation::LogRatio => reader.log_ratio_hh_hv_data(),
-                            }
-                                                    } else {
-                                Err(sarpro::io::SafeError::MissingField("polarization pair for operation"))
-                            };
-                        match processed {
-                            Ok(arr) => save_processed_image(
-                                &arr,
-                                out_path.as_path(),
-                                args.format,
-                                bit_depth_enum,
-                                target_size,
-                                Some(reader.metadata()),
-                                args.pad,
-                                args.autoscale,
-                                ProcessingOperation::PolarOp(op),
-                            ),
-                            Err(e) => Err(e.into()),
-                        }
-                    }
-                };
+                let save_res = resolve_polarization_and_save_image(
+                    &reader,
+                    args.polarization,
+                    out_path.as_path(),
+                    args.format,
+                    bit_depth_enum,
+                    target_size,
+                    args.synrgb_mode,
+                    args.pad,
+                    args.autoscale,
+                );
                 match save_res {
                     Ok(_) => { processed += 1; info!("Done: {:?}", out_path); }
                     Err(e) => { errors += 1; warn!("Error saving {:?}: {}", out_path, e); }
@@ -617,97 +584,17 @@ pub fn process_measurement_urls(args: &CliArgs) -> Result<(), Box<dyn std::error
     )?;
 
     let bit_depth_enum = match args.bit_depth { BitDepthArg::U8 => BitDepth::U8, BitDepthArg::U16 => BitDepth::U16 };
-    match args.polarization {
-        Polarization::Vv | Polarization::Vh | Polarization::Hh | Polarization::Hv => {
-            let processed = match args.polarization {
-                Polarization::Vv => reader.vv_data()?,
-                Polarization::Vh => reader.vh_data()?,
-                Polarization::Hh => reader.hh_data()?,
-                Polarization::Hv => reader.hv_data()?,
-                _ => unreachable!(),
-            };
-            save_processed_image(
-                &processed,
-                output.as_path(),
-                args.format,
-                bit_depth_enum,
-                target_size,
-                Some(reader.metadata()),
-                args.pad,
-                args.autoscale,
-                ProcessingOperation::SingleBand,
-            )?
-        }
-        Polarization::Multiband => {
-            if reader.vv_data().is_ok() && reader.vh_data().is_ok() {
-                let vv_processed = reader.vv_data()?;
-                let vh_processed = reader.vh_data()?;
-                save_processed_multiband_image_sequential(
-                    &vv_processed,
-                    &vh_processed,
-                    output.as_path(),
-                    args.format,
-                    bit_depth_enum,
-                    target_size,
-                    Some(reader.metadata()),
-                    args.pad,
-                    args.autoscale,
-                    ProcessingOperation::MultibandVvVh,
-                    args.synrgb_mode,
-                )?
-            } else if reader.hh_data().is_ok() && reader.hv_data().is_ok() {
-                let hh_processed = reader.hh_data()?;
-                let hv_processed = reader.hv_data()?;
-                save_processed_multiband_image_sequential(
-                    &hh_processed,
-                    &hv_processed,
-                    output.as_path(),
-                    args.format,
-                    bit_depth_enum,
-                    target_size,
-                    Some(reader.metadata()),
-                    args.pad,
-                    args.autoscale,
-                    ProcessingOperation::MultibandHhHv,
-                    args.synrgb_mode,
-                )?
-            } else {
-                return Err(AppError::IncompleDataPair { operation: "multiband".to_string(), available: reader.get_available_polarizations() }.into());
-            }
-        }
-        Polarization::OP(op) => {
-            let processed = if reader.vv_data().is_ok() && reader.vh_data().is_ok() {
-                match op {
-                    PolarizationOperation::Sum => reader.sum_data()?,
-                    PolarizationOperation::Diff => reader.difference_data()?,
-                    PolarizationOperation::Ratio => reader.ratio_data()?,
-                    PolarizationOperation::NDiff => reader.normalized_diff_data()?,
-                    PolarizationOperation::LogRatio => reader.log_ratio_data()?,
-                }
-            } else if reader.hh_data().is_ok() && reader.hv_data().is_ok() {
-                match op {
-                    PolarizationOperation::Sum => reader.sum_hh_hv_data()?,
-                    PolarizationOperation::Diff => reader.difference_hh_hv_data()?,
-                    PolarizationOperation::Ratio => reader.ratio_hh_hv_data()?,
-                    PolarizationOperation::NDiff => reader.normalized_diff_hh_hv_data()?,
-                    PolarizationOperation::LogRatio => reader.log_ratio_hh_hv_data()?,
-                }
-            } else {
-                return Err(AppError::IncompleDataPair { operation: args.polarization.to_string(), available: reader.get_available_polarizations() }.into());
-            };
-            save_processed_image(
-                &processed,
-                output.as_path(),
-                args.format,
-                bit_depth_enum,
-                target_size,
-                Some(reader.metadata()),
-                args.pad,
-                args.autoscale,
-                ProcessingOperation::PolarOp(op),
-            )?
-        }
-    }
+    resolve_polarization_and_save_image(
+        &reader,
+        args.polarization,
+        output.as_path(),
+        args.format,
+        bit_depth_enum,
+        target_size,
+        args.synrgb_mode,
+        args.pad,
+        args.autoscale,
+    )?;
     info!("Successfully processed remote measurements -> {:?}", output);
     Ok(())
 }
