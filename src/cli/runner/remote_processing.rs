@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{info, warn};
 use gdal::raster::ResampleAlg;
@@ -14,6 +14,177 @@ use sarpro::{BitDepthArg, Polarization, PolarizationOperation};
 
 use crate::cli::args::CliArgs;
 use crate::cli::errors::AppError;
+
+// Public-only headers provider for Step 3; Step 3.1 will plug real credentials
+trait HeadersProvider {
+    fn headers_for(&self, _url: &str) -> Vec<(String, String)> { Vec::new() }
+}
+
+struct NoAuthHeaders;
+impl HeadersProvider for NoAuthHeaders {}
+
+fn materialize_zip_if_requested(
+    zip_href: &str,
+    cache_dir: &Option<PathBuf>,
+    http_timeout_s: u64,
+    http_retries: u8,
+    http_backoff_ms: u64,
+) -> Result<String, Box<dyn std::error::Error>> {
+    // If no cache dir requested, return original href (stream via VSIZIP+VSICURL)
+    if cache_dir.is_none() {
+        return Ok(zip_href.to_string());
+    }
+    let cache_dir = cache_dir.as_ref().unwrap();
+    fs::create_dir_all(cache_dir)?;
+
+    // Derive a filename from the URL/path last segment
+    let fname = if zip_href.contains('/') { zip_href.rsplit('/').next().unwrap_or("remote.SAFE.zip") } else { "remote.SAFE.zip" };
+    let local_path = cache_dir.join(fname);
+
+    // If the href is already a local path, just copy/link it
+    if Path::new(zip_href).exists() {
+        // If destination exists, reuse; otherwise copy
+        if !local_path.exists() {
+            fs::copy(zip_href, &local_path)?;
+        }
+        return Ok(local_path.to_string_lossy().to_string());
+    }
+
+    // Use reqwest blocking client with simple retries and atomic write
+    let client = reqwest::blocking::Client::builder()
+        .gzip(true)
+        .brotli(true)
+        .deflate(true)
+        .timeout(std::time::Duration::from_secs(http_timeout_s))
+        .build()
+        .map_err(|e| AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("http client build error: {}", e) })?;
+
+    // Sidecars and resume state
+    let partial = local_path.with_extension("partial");
+    let etag_sidecar = local_path.with_extension("etag");
+
+    // Preflight HEAD for Content-Length/ETag (best-effort)
+    let mut head_req = client.head(zip_href);
+    for (k, v) in NoAuthHeaders.headers_for(zip_href) { head_req = head_req.header(&k, &v); }
+    let (content_len_opt, etag_opt, accept_ranges_bytes) = match head_req.send() {
+        Ok(resp) if resp.status().is_success() => {
+            (
+                resp.headers().get(reqwest::header::CONTENT_LENGTH)
+                    .and_then(|h| h.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok()),
+                resp.headers().get(reqwest::header::ETAG)
+                    .and_then(|h| h.to_str().ok())
+                    .map(|s| s.to_string()),
+                resp.headers().get(reqwest::header::ACCEPT_RANGES)
+                    .and_then(|h| h.to_str().ok())
+                    .map(|v| v.eq_ignore_ascii_case("bytes")).unwrap_or(false),
+            )
+        }
+        _ => (None, None, false),
+    };
+
+    // If complete file exists and content length matches (when known), reuse
+    if local_path.exists() {
+        if let Ok(md) = std::fs::metadata(&local_path) {
+            if let Some(cl) = content_len_opt {
+                if md.len() == cl {
+                    info!("Cache hit: using materialized ZIP {:?} ({} bytes)", local_path, md.len());
+                    return Ok(local_path.to_string_lossy().to_string());
+                }
+            } else {
+                // No known length; assume present is valid
+                info!("Cache hit: using materialized ZIP {:?}", local_path);
+                return Ok(local_path.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    // Determine resume position
+    let mut resume_from: u64 = 0;
+    if partial.exists() && accept_ranges_bytes {
+        if let Ok(md) = std::fs::metadata(&partial) { resume_from = md.len(); }
+        // ETag guard: if sidecar exists and new ETag differs, restart
+        if etag_sidecar.exists() {
+            if let (Ok(old), Some(new)) = (std::fs::read_to_string(&etag_sidecar), etag_opt.as_ref()) {
+                if old.trim() != new.trim() {
+                    info!("Partial invalidated due to ETag change; restarting download for {}", zip_href);
+                    let _ = std::fs::remove_file(&partial);
+                    let _ = std::fs::remove_file(&etag_sidecar);
+                    resume_from = 0;
+                }
+            }
+        }
+    } else {
+        // Clean stale partial if cannot resume
+        let _ = std::fs::remove_file(&partial);
+        resume_from = 0;
+    }
+
+    // Store ETag sidecar for future resume
+    if let Some(ref et) = etag_opt {
+        let _ = std::fs::write(&etag_sidecar, et);
+    }
+
+    // Prepare destination file (append for resume, overwrite otherwise)
+    let mut file = if resume_from > 0 { 
+        std::fs::OpenOptions::new().create(true).append(true).open(&partial)
+    } else {
+        std::fs::File::create(&partial)
+    }.map_err(|e| AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("open partial error: {}", e) })?;
+
+    if resume_from > 0 {
+        info!("Resuming download: {} from {} bytes", zip_href, resume_from);
+    } else {
+        info!("Downloading to cache: {} -> {:?}", zip_href, partial);
+    }
+
+    // GET with retries/backoff and optional Range for resume
+    let mut attempts = 0u8;
+    let max_retries = http_retries.max(1);
+    loop {
+        attempts += 1;
+        let mut req = client.get(zip_href);
+        // no-auth headers for Step 3 (empty)
+        for (k, v) in NoAuthHeaders.headers_for(zip_href) { req = req.header(&k, &v); }
+        if resume_from > 0 { req = req.header(reqwest::header::RANGE, format!("bytes={}-", resume_from)); }
+        let resp = req.send();
+        match resp {
+            Ok(r) if r.status().is_success() => {
+                let mut body = r
+                    .error_for_status()
+                    .map_err(|e| AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("http status error: {}", e) })?;
+                let copied = std::io::copy(&mut body, &mut file)
+                    .map_err(|e| AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("write error: {}", e) })?;
+                let _ = file.sync_all();
+                // Verify length when known
+                if let Some(total) = content_len_opt { 
+                    let have = std::fs::metadata(&partial).ok().map(|m| m.len()).unwrap_or(0);
+                    if have != total { 
+                        // allow retry
+                        if attempts < max_retries { std::thread::sleep(std::time::Duration::from_millis(http_backoff_ms * attempts as u64)); continue; }
+                        return Err(AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("size mismatch: have {}, want {} (copied {})", have, total, copied) }.into());
+                    }
+                }
+                std::fs::rename(&partial, &local_path)
+                    .map_err(|e| AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("rename error: {}", e) })?;
+                let final_len = std::fs::metadata(&local_path).ok().map(|m| m.len()).unwrap_or(0);
+                info!("Cached ZIP ready: {:?} ({} bytes)", local_path, final_len);
+                return Ok(local_path.to_string_lossy().to_string());
+            }
+            Ok(r) if r.status().as_u16() >= 500 || r.status().as_u16() == 429 => {
+                if attempts < max_retries { std::thread::sleep(std::time::Duration::from_millis(http_backoff_ms * attempts as u64)); continue; }
+                return Err(AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("http error {} after retries", r.status()) }.into());
+            }
+            Ok(r) => {
+                return Err(AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("http error {}", r.status()) }.into());
+            }
+            Err(e) => {
+                if attempts < max_retries { std::thread::sleep(std::time::Duration::from_millis(http_backoff_ms * attempts as u64)); continue; }
+                return Err(AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("network error: {}", e) }.into());
+            }
+        }
+    }
+}
 
 pub fn process_safe_zip_url(args: &CliArgs) -> Result<(), Box<dyn std::error::Error>> {
     let zip_url = args.safe_zip_url.as_ref().unwrap();
@@ -35,8 +206,17 @@ pub fn process_safe_zip_url(args: &CliArgs) -> Result<(), Box<dyn std::error::Er
     };
     let target_size = if args.size == "original" { None } else { Some(args.size.parse::<usize>().map_err(|_| AppError::InvalidSize { size: args.size.clone() })?) };
 
-    let reader = SafeReader::open_from_safe_zip_url(
+    // Decide streaming vs materialization based on --remote-cache-dir
+    let href = materialize_zip_if_requested(
         zip_url,
+        &args.remote_cache_dir,
+        args.http_timeout,
+        args.http_retries as u8,
+        args.http_backoff_ms,
+    )?;
+
+    let reader = SafeReader::open_from_safe_zip_url(
+        &href,
         args.polarization,
         target_arg,
         resample_alg,
@@ -276,13 +456,20 @@ pub fn process_safe_zip_dir_url(args: &CliArgs) -> Result<(), Box<dyn std::error
         // Avoid stray entries
         if zip_name == "." || zip_name == ".." { continue; }
         let zip_url = format!("{}/{}", dir_url.trim_end_matches('/'), zip_name);
+        let href = materialize_zip_if_requested(
+            &zip_url,
+            &args.remote_cache_dir,
+            args.http_timeout,
+            args.http_retries as u8,
+            args.http_backoff_ms,
+        )?;
         let safe_stem = zip_name.trim_end_matches(".SAFE.zip");
         let out_name = format!("{}.{}", safe_stem, match args.format { OutputFormat::TIFF => "tiff", OutputFormat::JPEG => "jpg" });
         let out_path = output_dir.join(out_name);
 
-        info!("Processing remote SAFE ZIP: {} -> {:?}", zip_url, out_path);
+        info!("Processing remote SAFE ZIP: {} -> {:?}", href, out_path);
         let reader_res = SafeReader::open_from_safe_zip_url(
-            &zip_url,
+            &href,
             args.polarization,
             target_arg.clone(),
             resample_alg,
