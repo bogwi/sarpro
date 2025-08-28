@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tracing::{info, warn};
+use tracing::{info, warn, debug};
 use gdal::raster::ResampleAlg;
 use sarpro::core::processing::save::{
     save_processed_image, save_processed_multiband_image_sequential,
@@ -217,6 +217,7 @@ fn materialize_zip_if_requested(
         .gzip(true)
         .brotli(true)
         .deflate(true)
+        .redirect(reqwest::redirect::Policy::limited(10))
         .timeout(std::time::Duration::from_secs(http_timeout_s))
         .build()
         .map_err(|e| AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("http client build error: {}", e) })?;
@@ -228,31 +229,34 @@ fn materialize_zip_if_requested(
         let _ = provider.prepare();
     }
 
-    // Preflight HEAD to discover Content-Length / ETag / Content-Disposition / Range support
-    let mut head_req = client.head(&download_url);
+    // Preflight: discover Content-Length and filename using a 0-0 ranged GET (no resume logic)
+    let mut content_len_opt: Option<u64> = None;
+    let mut cd_filename_opt: Option<String> = None;
+    let mut probe_req = client.get(&download_url)
+        .header(reqwest::header::RANGE, "bytes=0-0")
+        .header(reqwest::header::ACCEPT_ENCODING, "identity");
     if let Some(provider) = cdse.as_ref() {
         if let Ok(hmap) = provider.headers_for(&download_url) {
-            for (k, v) in hmap { head_req = head_req.header(k, v); }
+            for (k, v) in hmap { probe_req = probe_req.header(k, v); }
         }
     }
-    let (content_len_opt, etag_opt, accept_ranges_header_log, cd_filename_opt) = match head_req.send() {
-        Ok(resp) if resp.status().is_success() => {
-            let content_len = resp.headers().get(reqwest::header::CONTENT_LENGTH)
+    if let Ok(resp) = probe_req.send() {
+        if resp.status().is_success() {
+            // Prefer Content-Range total (bytes start-end/total)
+            content_len_opt = resp.headers().get(reqwest::header::CONTENT_RANGE)
                 .and_then(|h| h.to_str().ok())
-                .and_then(|s| s.parse::<u64>().ok());
-            let etag = resp.headers().get(reqwest::header::ETAG)
-                .and_then(|h| h.to_str().ok())
-                .map(|s| s.to_string());
-            // Check Accept-Ranges header for logging (we don't rely on it for resume decisions)
-            let accept_ranges_header = resp.headers().get(reqwest::header::ACCEPT_RANGES)
-                .and_then(|h| h.to_str().ok())
-                .unwrap_or("not advertised")
-                .to_string();
+                .and_then(|s| {
+                    let parts: Vec<&str> = s.split('/').collect();
+                    if parts.len() == 2 { parts[1].parse::<u64>().ok() } else { None }
+                })
+                .or_else(|| resp.headers().get(reqwest::header::CONTENT_LENGTH)
+                    .and_then(|h| h.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok()));
             // Parse Content-Disposition filename
-            let cd_filename = resp.headers().get("content-disposition")
+            cd_filename_opt = resp.headers().get(reqwest::header::CONTENT_DISPOSITION)
+                .or_else(|| resp.headers().get("content-disposition"))
                 .and_then(|h| h.to_str().ok())
                 .and_then(|cd| {
-                    // look for filename= or filename*= (take simple filename= first)
                     let lower = cd.to_string();
                     let mut fname: Option<String> = None;
                     for part in lower.split(';') {
@@ -264,10 +268,9 @@ fn materialize_zip_if_requested(
                     }
                     fname
                 });
-            (content_len, etag, accept_ranges_header, cd_filename)
         }
-        _ => (None, None, "unknown".to_string(), None),
-    };
+    }
+    debug!("content_len_opt: {:?}, cd_filename_opt: {:?}", content_len_opt, cd_filename_opt);
 
     // If CDSE and no Content-Disposition filename, try OData metadata Name
     let mut canonical_name: Option<String> = cd_filename_opt;
@@ -336,7 +339,7 @@ fn materialize_zip_if_requested(
         if let Ok(md) = std::fs::metadata(&local_path) {
             if let Some(cl) = content_len_opt {
                 if md.len() == cl {
-                    let entry = CacheEntry { local_path: local_path.clone(), etag: etag_opt.clone(), content_length: content_len_opt };
+                    let entry = CacheEntry { local_path: local_path.clone(), etag: None, content_length: content_len_opt };
                     cache_put_url(&mut index, zip_href, entry.clone());
                     cache_put_url(&mut index, &download_url, entry.clone());
                     if let Some(uuid) = cdse_uuid.as_ref() { cache_put_alias(&mut index, "cdse", uuid, entry.clone()); }
@@ -345,7 +348,7 @@ fn materialize_zip_if_requested(
                     return Ok(local_path.to_string_lossy().to_string());
                 }
             } else {
-                let entry = CacheEntry { local_path: local_path.clone(), etag: etag_opt.clone(), content_length: content_len_opt };
+                let entry = CacheEntry { local_path: local_path.clone(), etag: None, content_length: content_len_opt };
                 cache_put_url(&mut index, zip_href, entry.clone());
                 cache_put_url(&mut index, &download_url, entry.clone());
                 if let Some(uuid) = cdse_uuid.as_ref() { cache_put_alias(&mut index, "cdse", uuid, entry.clone()); }
@@ -356,9 +359,8 @@ fn materialize_zip_if_requested(
         }
     }
 
-    // Sidecars and resume state
+    // Prepare partial path
     let partial = local_path.with_extension("partial");
-    let etag_sidecar = local_path.with_extension("etag");
 
     // If complete file exists and content length matches (when known), reuse
     if local_path.exists() {
@@ -376,64 +378,23 @@ fn materialize_zip_if_requested(
         }
     }
 
-    // Determine resume position
-    // Always try to resume if partial file exists (following wget/curl approach)
-    let mut resume_from: u64 = 0;
-    let should_attempt_resume = partial.exists();
-
-    if should_attempt_resume {
-        if let Ok(md) = std::fs::metadata(&partial) {
-            resume_from = md.len();
-            // ETag guard: if sidecar exists and new ETag differs, restart
-            if etag_sidecar.exists() {
-                if let (Ok(old), Some(new)) = (std::fs::read_to_string(&etag_sidecar), etag_opt.as_ref()) {
-                    if old.trim() != new.trim() {
-                        info!("Partial invalidated due to ETag change; restarting download for {}", zip_href);
-                        let _ = std::fs::remove_file(&partial);
-                        let _ = std::fs::remove_file(&etag_sidecar);
-                        resume_from = 0;
-                    }
-                }
-            }
-            if resume_from > 0 {
-                info!("Will attempt to resume download from {} bytes (Accept-Ranges: {})",
-                      resume_from, accept_ranges_header_log);
-            }
-        }
-    }
-
-    // Store ETag sidecar for future resume
-    if let Some(ref et) = etag_opt {
-        let _ = std::fs::write(&etag_sidecar, et);
-    }
-
-    // Prepare destination file (append for resume, overwrite otherwise)
-    let mut file = if resume_from > 0 { 
-        std::fs::OpenOptions::new().create(true).append(true).open(&partial)
-    } else {
-        std::fs::File::create(&partial)
-    }.map_err(|e| AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("open partial error: {}", e) })?;
-
-    if resume_from > 0 {
-        info!("Resuming download: {} from {} bytes", zip_href, resume_from);
-    } else {
-        info!("Downloading to cache: {} -> {:?}", zip_href, partial);
-    }
+    // Always start fresh: create/truncate partial
+    let mut file = std::fs::File::create(&partial)
+        .map_err(|e| AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("open partial error: {}", e) })?;
+    info!("Downloading to cache: {} -> {:?}", zip_href, partial);
 
     // GET with retries/backoff and optional Range for resume
     let mut attempts = 0u8;
     let max_retries = http_retries.max(1);
     loop {
         attempts += 1;
-        let mut req = client.get(&download_url);
+        // Simple GET with redirects handled by client
+        let mut req = client.get(&download_url)
+            .header(reqwest::header::ACCEPT_ENCODING, "identity");
         if let Some(provider) = cdse.as_ref() {
             if let Ok(hmap) = provider.headers_for(&download_url) {
                 for (k, v) in hmap { req = req.header(k, v); }
             }
-        }
-        // Always send Range header if we have a resume position (server will ignore if unsupported)
-        if resume_from > 0 {
-            req = req.header(reqwest::header::RANGE, format!("bytes={}-", resume_from));
         }
         let resp = req.send();
         match resp {
@@ -458,35 +419,12 @@ fn materialize_zip_if_requested(
                 let final_len = std::fs::metadata(&local_path).ok().map(|m| m.len()).unwrap_or(0);
                 info!("Cached ZIP ready: {:?} ({} bytes)", local_path, final_len);
                 // Update index with URL and alias
-                let entry = CacheEntry { local_path: local_path.clone(), etag: etag_opt.clone(), content_length: content_len_opt };
+                let entry = CacheEntry { local_path: local_path.clone(), etag: None, content_length: content_len_opt };
                 cache_put_url(&mut index, zip_href, entry.clone());
                 cache_put_url(&mut index, &download_url, entry.clone());
                 if let Some(uuid) = cdse_uuid.as_ref() { cache_put_alias(&mut index, "cdse", uuid, entry.clone()); }
                 save_index(cache_dir, &index);
                 return Ok(local_path.to_string_lossy().to_string());
-            }
-            Ok(r) if r.status().as_u16() == 416 => {
-                // Range Not Satisfiable - server doesn't support ranges
-                // Fall back to fresh download by removing partial and restarting
-                warn!("Server doesn't support range requests (416 Range Not Satisfiable), falling back to fresh download");
-                let _ = std::fs::remove_file(&partial);
-                let _ = std::fs::remove_file(&etag_sidecar);
-                resume_from = 0;
-                // Reopen file for fresh download
-                file = std::fs::File::create(&partial)
-                    .map_err(|e| AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("recreate partial error: {}", e) })?;
-                // Retry without range header
-                continue;
-            }
-            Ok(r) if r.status().as_u16() == 400 && resume_from > 0 => {
-                // Bad Request when sending Range header - server may not support ranges
-                warn!("Server rejected range request (400 Bad Request), falling back to fresh download");
-                let _ = std::fs::remove_file(&partial);
-                let _ = std::fs::remove_file(&etag_sidecar);
-                resume_from = 0;
-                file = std::fs::File::create(&partial)
-                    .map_err(|e| AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("recreate partial error: {}", e) })?;
-                continue;
             }
             Ok(r) if r.status().as_u16() >= 500 || r.status().as_u16() == 429 => {
                 if attempts < max_retries { std::thread::sleep(std::time::Duration::from_millis(http_backoff_ms * attempts as u64)); continue; }
