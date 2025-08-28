@@ -54,6 +54,7 @@ quick-xml = "0.27"
 chrono = { version = "0.4", features = ["serde"] }
 tempfile = "3"
 reqwest = { version = "0.12", features = ["blocking", "gzip", "brotli", "deflate", "json"] }
+dirs = "5"
 
 # GUI dependencies (only with gui feature)
 eframe = { version = "0.32.0", optional = true }

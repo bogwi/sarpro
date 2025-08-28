@@ -9,7 +9,7 @@ use sarpro::core::processing::save::{
 use sarpro::io::sentinel1::TargetCrsArg;
 use sarpro::io::gdal::to_gdal_path;
 use sarpro::io::SafeReader;
-use sarpro::io::credentials::{CdseProvider, CredentialProvider};
+use sarpro::io::credentials::{CdseProvider, AsfProvider, CredentialProvider};
 use sarpro::io::cache::{CacheEntry, load_index, save_index, get_url as cache_get_url, get_alias as cache_get_alias, put_url as cache_put_url, put_alias as cache_put_alias};
 use sarpro::types::{AutoscaleStrategy, BitDepth, OutputFormat, ProcessingOperation, SyntheticRgbMode};
 use sarpro::{BitDepthArg, Polarization, PolarizationOperation};
@@ -157,8 +157,20 @@ fn materialize_zip_if_requested(
     http_retries: u8,
     http_backoff_ms: u64,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    let is_cdse = zip_href.contains("download.dataspace.copernicus.eu") && zip_href.contains("/odata/") && zip_href.contains("/Products(");
+    let is_asf = zip_href.contains("asf.alaska.edu");
+
     // If no cache dir requested, return original href (stream via VSIZIP+VSICURL)
     if cache_dir.is_none() {
+        // Prepare provider envs for streaming when needed
+        if is_asf {
+            let mut asf = AsfProvider::new(http_timeout_s);
+            let _ = asf.prepare();
+        }
+        if is_cdse {
+            let mut cdse = CdseProvider::new(http_timeout_s);
+            let _ = cdse.prepare();
+        }
         return Ok(zip_href.to_string());
     }
     let cache_dir = cache_dir.as_ref().unwrap();
@@ -167,8 +179,6 @@ fn materialize_zip_if_requested(
     // Load cache index
     let mut index = load_index(cache_dir);
 
-    // Recognize CDSE OData URL and extract UUID
-    let is_cdse = zip_href.contains("download.dataspace.copernicus.eu") && zip_href.contains("/odata/") && zip_href.contains("/Products(");
     let cdse_uuid: Option<String> = if is_cdse {
         // extract between Products( and )
         let mut uuid_opt: Option<String> = None;
@@ -212,7 +222,7 @@ fn materialize_zip_if_requested(
         }
     }
 
-    // Build HTTP client
+    // Build HTTP client (used mainly for CDSE OData)
     let client = reqwest::blocking::Client::builder()
         .gzip(true)
         .brotli(true)
@@ -224,52 +234,151 @@ fn materialize_zip_if_requested(
 
     // Prepare CredentialProvider for CDSE
     let mut cdse = if is_cdse { Some(CdseProvider::new(http_timeout_s)) } else { None };
+    let mut asf = if is_asf { Some(AsfProvider::new(http_timeout_s)) } else { None };
     if let Some(provider) = cdse.as_mut() {
         // Best-effort prepare; if missing creds, HEAD/GET may fail and will surface clearly
         let _ = provider.prepare();
     }
+    if let Some(provider) = asf.as_mut() {
+        let _ = provider.prepare();
+    }
 
-    // Preflight: discover Content-Length and filename using a 0-0 ranged GET (no resume logic)
+    // Preflight: discover Content-Length and filename in a provider-agnostic way
+    fn parse_disposition_filename(header_val: &str) -> Option<String> {
+        let mut fname: Option<String> = None;
+        for part in header_val.split(';') {
+            let p = part.trim();
+            if let Some(eq) = p.find("filename=") {
+                let val = p[eq+9..].trim().trim_matches('"');
+                if !val.is_empty() { fname = Some(val.to_string()); break; }
+            }
+        }
+        fname
+    }
+
     let mut content_len_opt: Option<u64> = None;
     let mut cd_filename_opt: Option<String> = None;
-    let mut probe_req = client.get(&download_url)
-        .header(reqwest::header::RANGE, "bytes=0-0")
-        .header(reqwest::header::ACCEPT_ENCODING, "identity");
-    if let Some(provider) = cdse.as_ref() {
-        if let Ok(hmap) = provider.headers_for(&download_url) {
-            for (k, v) in hmap { probe_req = probe_req.header(k, v); }
-        }
-    }
-    if let Ok(resp) = probe_req.send() {
-        if resp.status().is_success() {
-            // Prefer Content-Range total (bytes start-end/total)
-            content_len_opt = resp.headers().get(reqwest::header::CONTENT_RANGE)
-                .and_then(|h| h.to_str().ok())
-                .and_then(|s| {
-                    let parts: Vec<&str> = s.split('/').collect();
-                    if parts.len() == 2 { parts[1].parse::<u64>().ok() } else { None }
-                })
-                .or_else(|| resp.headers().get(reqwest::header::CONTENT_LENGTH)
-                    .and_then(|h| h.to_str().ok())
-                    .and_then(|s| s.parse::<u64>().ok()));
-            // Parse Content-Disposition filename
-            cd_filename_opt = resp.headers().get(reqwest::header::CONTENT_DISPOSITION)
-                .or_else(|| resp.headers().get("content-disposition"))
-                .and_then(|h| h.to_str().ok())
-                .and_then(|cd| {
-                    let lower = cd.to_string();
-                    let mut fname: Option<String> = None;
-                    for part in lower.split(';') {
-                        let p = part.trim();
-                        if let Some(eq) = p.find("filename=") {
-                            let val = p[eq+9..].trim().trim_matches('"');
-                            if !val.is_empty() { fname = Some(val.to_string()); break; }
+
+    // A) ASF: use curl with netrc/cookies to get headers deterministically
+    if is_asf {
+        if let Some(p) = asf.as_ref() {
+            // Try HEAD first
+            info!("ASF preflight HEAD: {}", download_url);
+            let head_out = Command::new("curl")
+                .arg("-I").arg("-L").arg("-sS")
+                .arg("--connect-timeout").arg(format!("{}", http_timeout_s))
+                .arg("--netrc-file").arg(p.netrc_path.as_os_str())
+                .arg("-c").arg(p.cookie_jar.as_os_str())
+                .arg("-b").arg(p.cookie_file.as_os_str())
+                .arg(&download_url)
+                .output();
+            if let Ok(o) = head_out {
+                let headers = String::from_utf8_lossy(&o.stdout);
+                for line in headers.lines() {
+                    let l = line.trim();
+                    if l.to_ascii_lowercase().starts_with("content-length:") {
+                        if let Some(v) = l.splitn(2, ':').nth(1) {
+                            if let Ok(val) = v.trim().parse::<u64>() {
+                                if val > 0 { content_len_opt = Some(val); } else { content_len_opt = None; }
+                            }
+                        }
+                    } else if l.to_ascii_lowercase().starts_with("content-disposition:") {
+                        if let Some(v) = l.splitn(2, ':').nth(1) { cd_filename_opt = parse_disposition_filename(v.trim()); }
+                    }
+                }
+                if let Some(len) = content_len_opt { info!("ASF HEAD: Content-Length={}", len); }
+                if let Some(ref fname) = cd_filename_opt { info!("ASF HEAD: Content-Disposition filename={}", fname); }
+            }
+            // If still no size, try 0-0 range to pick Content-Range total
+            if content_len_opt.is_none() {
+                info!("ASF preflight RANGE 0-0: {}", download_url);
+                let range_out = Command::new("curl")
+                    .arg("-L").arg("-sS")
+                    .arg("--connect-timeout").arg(format!("{}", http_timeout_s))
+                    .arg("-r").arg("0-0")
+                    .arg("-D").arg("-")
+                    .arg("-o").arg("/dev/null")
+                    .arg("--netrc-file").arg(p.netrc_path.as_os_str())
+                    .arg("-c").arg(p.cookie_jar.as_os_str())
+                    .arg("-b").arg(p.cookie_file.as_os_str())
+                    .arg(&download_url)
+                    .output();
+                if let Ok(o) = range_out {
+                    let headers = String::from_utf8_lossy(&o.stdout);
+                    for line in headers.lines() {
+                        let l = line.trim();
+                        if l.to_ascii_lowercase().starts_with("content-range:") {
+                            if let Some(v) = l.splitn(2, ':').nth(1) {
+                                let s = v.trim();
+                                if let Some(total) = s.rsplit('/').next() { content_len_opt = total.trim().parse::<u64>().ok(); }
+                            }
+                        } else if l.to_ascii_lowercase().starts_with("content-disposition:") {
+                            if let Some(v) = l.splitn(2, ':').nth(1) { if cd_filename_opt.is_none() { cd_filename_opt = parse_disposition_filename(v.trim()); } }
                         }
                     }
-                    fname
-                });
+                    if let Some(len) = content_len_opt { info!("ASF RANGE: Content-Length={}", len); }
+                    if let Some(ref fname) = cd_filename_opt { info!("ASF RANGE: Content-Disposition filename={}", fname); }
+                }
+            }
         }
     }
+
+    // B) CDSE: reqwest range probe with Authorization
+    if is_cdse {
+        let mut probe_req = client.get(&download_url)
+            .header(reqwest::header::RANGE, "bytes=0-0")
+            .header(reqwest::header::ACCEPT_ENCODING, "identity");
+        if let Some(provider) = cdse.as_ref() {
+            if let Ok(hmap) = provider.headers_for(&download_url) {
+                for (k, v) in hmap { probe_req = probe_req.header(k, v); }
+            }
+        }
+        if let Ok(resp) = probe_req.send() {
+            if resp.status().is_success() {
+                content_len_opt = content_len_opt.or_else(|| resp.headers().get(reqwest::header::CONTENT_RANGE)
+                    .and_then(|h| h.to_str().ok())
+                    .and_then(|s| {
+                        let parts: Vec<&str> = s.split('/').collect();
+                        if parts.len() == 2 { parts[1].parse::<u64>().ok() } else { None }
+                    }))
+                    .or_else(|| resp.headers().get(reqwest::header::CONTENT_LENGTH)
+                        .and_then(|h| h.to_str().ok())
+                        .and_then(|s| s.parse::<u64>().ok()));
+                if cd_filename_opt.is_none() {
+                    cd_filename_opt = resp.headers().get(reqwest::header::CONTENT_DISPOSITION)
+                        .or_else(|| resp.headers().get("content-disposition"))
+                        .and_then(|h| h.to_str().ok())
+                        .and_then(|cd| parse_disposition_filename(cd));
+                }
+            }
+        }
+        // If still missing name/length, try OData select
+        if (cd_filename_opt.is_none() || content_len_opt.is_none()) && cdse_uuid.is_some() {
+            if let Some(provider) = cdse.as_ref() {
+                let base_meta = if download_url.ends_with("/$value") { &download_url[..download_url.len()-"/$value".len()] } else { zip_href };
+                let meta_url = format!("{}?$select=Name,ContentLength", base_meta);
+                let mut req = client.get(&meta_url);
+                if let Ok(hmap) = provider.headers_for(&meta_url) { for (k, v) in hmap { req = req.header(k, v); } }
+                if let Ok(resp) = req.send() {
+                    if resp.status().is_success() {
+                        if let Ok(json) = resp.json::<serde_json::Value>() {
+                            if cd_filename_opt.is_none() {
+                                if let Some(name) = json.get("Name").and_then(|v| v.as_str()) {
+                                    let mut fname = name.to_string();
+                                    if fname.to_lowercase().ends_with(".safe.zip") { cd_filename_opt = Some(fname); }
+                                    else if fname.to_lowercase().ends_with(".safe") { fname.push_str(".zip"); cd_filename_opt = Some(fname); }
+                                }
+                            }
+                            if content_len_opt.is_none() {
+                                if let Some(len) = json.get("ContentLength").and_then(|v| v.as_u64()) { content_len_opt = Some(len); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     debug!("content_len_opt: {:?}, cd_filename_opt: {:?}", content_len_opt, cd_filename_opt);
 
     // If CDSE and no Content-Disposition filename, try OData metadata Name
@@ -378,9 +487,11 @@ fn materialize_zip_if_requested(
         }
     }
 
-    // Always start fresh: create/truncate partial
-    let mut file = std::fs::File::create(&partial)
-        .map_err(|e| AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("open partial error: {}", e) })?;
+    // Create/truncate partial only for reqwest path. For ASF curl path we must not truncate to enable resume.
+    if !is_asf {
+        let _f = std::fs::File::create(&partial)
+            .map_err(|e| AppError::RemoteDirListing { url: zip_href.to_string(), hint: format!("open partial error: {}", e) })?;
+    }
     info!("Downloading to cache: {} -> {:?}", zip_href, partial);
 
     // GET with retries/backoff and optional Range for resume
@@ -388,54 +499,100 @@ fn materialize_zip_if_requested(
     let max_retries = http_retries.max(1);
     loop {
         attempts += 1;
-        // Simple GET with redirects handled by client
-        let mut req = client.get(&download_url)
-            .header(reqwest::header::ACCEPT_ENCODING, "identity");
-        if let Some(provider) = cdse.as_ref() {
-            if let Ok(hmap) = provider.headers_for(&download_url) {
-                for (k, v) in hmap { req = req.header(k, v); }
-            }
-        }
-        let resp = req.send();
-        match resp {
-            Ok(r) if r.status().is_success() => {
-                let mut body = r
-                    .error_for_status()
-                    .map_err(|e| AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("http status error: {}", e) })?;
-                let copied = std::io::copy(&mut body, &mut file)
-                    .map_err(|e| AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("write error: {}", e) })?;
-                let _ = file.sync_all();
-                // Verify length when known
-                if let Some(total) = content_len_opt {
-                    let have = std::fs::metadata(&partial).ok().map(|m| m.len()).unwrap_or(0);
-                    if have != total {
-                        // allow retry
-                        if attempts < max_retries { std::thread::sleep(std::time::Duration::from_millis(http_backoff_ms * attempts as u64)); continue; }
-                        return Err(AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("size mismatch: have {}, want {} (copied {})", have, total, copied) }.into());
-                    }
+        if is_asf {
+            // Use curl with netrc and cookie jar for ASF, enable resume and avoid overall max-time
+            let mut cmd = Command::new("curl");
+            let resume_from = std::fs::metadata(&partial).map(|m| m.len()).unwrap_or(0);
+            info!("ASF curl download: resume at {} of {:?}", resume_from, content_len_opt);
+            cmd.arg("-L")
+                .arg("--fail")
+                .arg("-sS")
+                .arg("--connect-timeout").arg(format!("{}", http_timeout_s))
+                .arg("--netrc-file").arg(asf.as_ref().unwrap().netrc_path.as_os_str())
+                .arg("-c").arg(asf.as_ref().unwrap().cookie_jar.as_os_str())
+                .arg("-b").arg(asf.as_ref().unwrap().cookie_file.as_os_str())
+                .arg("-C").arg("-") // resume from current size if exists
+                .arg("--retry").arg(format!("{}", http_retries.max(1)))
+                .arg("--retry-all-errors")
+                .arg("--retry-delay").arg(format!("{}", (http_backoff_ms / 1000).max(1)))
+                .arg("-o").arg(&partial)
+                .arg(&download_url);
+            let status = cmd.status();
+            match status {
+                Ok(s) if s.success() => {
+                    std::fs::rename(&partial, &local_path)
+                        .map_err(|e| AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("rename error: {}", e) })?;
+                    let final_len = std::fs::metadata(&local_path).ok().map(|m| m.len()).unwrap_or(0);
+                    info!("Cached ZIP ready: {:?} ({} bytes)", local_path, final_len);
+                    let entry = CacheEntry { local_path: local_path.clone(), etag: None, content_length: None };
+                    cache_put_url(&mut index, zip_href, entry.clone());
+                    cache_put_url(&mut index, &download_url, entry.clone());
+                    save_index(cache_dir, &index);
+                    return Ok(local_path.to_string_lossy().to_string());
                 }
-                std::fs::rename(&partial, &local_path)
-                    .map_err(|e| AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("rename error: {}", e) })?;
-                let final_len = std::fs::metadata(&local_path).ok().map(|m| m.len()).unwrap_or(0);
-                info!("Cached ZIP ready: {:?} ({} bytes)", local_path, final_len);
-                // Update index with URL and alias
-                let entry = CacheEntry { local_path: local_path.clone(), etag: None, content_length: content_len_opt };
-                cache_put_url(&mut index, zip_href, entry.clone());
-                cache_put_url(&mut index, &download_url, entry.clone());
-                if let Some(uuid) = cdse_uuid.as_ref() { cache_put_alias(&mut index, "cdse", uuid, entry.clone()); }
-                save_index(cache_dir, &index);
-                return Ok(local_path.to_string_lossy().to_string());
+                Ok(s) => {
+                    warn!("ASF curl exited with status {}. Partial may exist at {:?}", s, partial);
+                    if attempts < max_retries { std::thread::sleep(std::time::Duration::from_millis(http_backoff_ms * attempts as u64)); continue; }
+                    return Err(AppError::RemoteDirListing { url: download_url.to_string(), hint: "curl download failed for ASF after retries".to_string() }.into());
+                }
+                Err(e) => {
+                    warn!("ASF curl failed to start: {}", e);
+                    if attempts < max_retries { std::thread::sleep(std::time::Duration::from_millis(http_backoff_ms * attempts as u64)); continue; }
+                    return Err(AppError::RemoteDirListing { url: download_url.to_string(), hint: "curl download failed for ASF after retries".to_string() }.into());
+                }
             }
-            Ok(r) if r.status().as_u16() >= 500 || r.status().as_u16() == 429 => {
-                if attempts < max_retries { std::thread::sleep(std::time::Duration::from_millis(http_backoff_ms * attempts as u64)); continue; }
-                return Err(AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("http error {} after retries", r.status()) }.into());
+        } else {
+            // Simple GET with redirects handled by client (CDSE and generic)
+            let mut req = client.get(&download_url)
+                .header(reqwest::header::ACCEPT_ENCODING, "identity");
+            if let Some(provider) = cdse.as_ref() {
+                if let Ok(hmap) = provider.headers_for(&download_url) {
+                    for (k, v) in hmap { req = req.header(k, v); }
+                }
             }
-            Ok(r) => {
-                return Err(AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("http error {}", r.status()) }.into());
-            }
-            Err(e) => {
-                if attempts < max_retries { std::thread::sleep(std::time::Duration::from_millis(http_backoff_ms * attempts as u64)); continue; }
-                return Err(AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("network error: {}", e) }.into());
+            let resp = req.send();
+            match resp {
+                Ok(r) if r.status().is_success() => {
+                    let mut file = std::fs::File::create(&partial)
+                        .map_err(|e| AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("open partial error: {}", e) })?;
+                    let mut body = r
+                        .error_for_status()
+                        .map_err(|e| AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("http status error: {}", e) })?;
+                    let copied = std::io::copy(&mut body, &mut file)
+                        .map_err(|e| AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("write error: {}", e) })?;
+                    let _ = file.sync_all();
+                    // Verify length when known
+                    if let Some(total) = content_len_opt {
+                        let have = std::fs::metadata(&partial).ok().map(|m| m.len()).unwrap_or(0);
+                        if have != total {
+                            // allow retry
+                            if attempts < max_retries { std::thread::sleep(std::time::Duration::from_millis(http_backoff_ms * attempts as u64)); continue; }
+                            return Err(AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("size mismatch: have {}, want {} (copied {})", have, total, copied) }.into());
+                        }
+                    }
+                    std::fs::rename(&partial, &local_path)
+                        .map_err(|e| AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("rename error: {}", e) })?;
+                    let final_len = std::fs::metadata(&local_path).ok().map(|m| m.len()).unwrap_or(0);
+                    info!("Cached ZIP ready: {:?} ({} bytes)", local_path, final_len);
+                    // Update index with URL and alias
+                    let entry = CacheEntry { local_path: local_path.clone(), etag: None, content_length: content_len_opt };
+                    cache_put_url(&mut index, zip_href, entry.clone());
+                    cache_put_url(&mut index, &download_url, entry.clone());
+                    if let Some(uuid) = cdse_uuid.as_ref() { cache_put_alias(&mut index, "cdse", uuid, entry.clone()); }
+                    save_index(cache_dir, &index);
+                    return Ok(local_path.to_string_lossy().to_string());
+                }
+                Ok(r) if r.status().as_u16() >= 500 || r.status().as_u16() == 429 => {
+                    if attempts < max_retries { std::thread::sleep(std::time::Duration::from_millis(http_backoff_ms * attempts as u64)); continue; }
+                    return Err(AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("http error {} after retries", r.status()) }.into());
+                }
+                Ok(r) => {
+                    return Err(AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("http error {}", r.status()) }.into());
+                }
+                Err(e) => {
+                    if attempts < max_retries { std::thread::sleep(std::time::Duration::from_millis(http_backoff_ms * attempts as u64)); continue; }
+                    return Err(AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("network error: {}", e) }.into());
+                }
             }
         }
     }
@@ -469,6 +626,12 @@ pub fn process_safe_zip_url(args: &CliArgs) -> Result<(), Box<dyn std::error::Er
         args.http_retries as u8,
         args.http_backoff_ms,
     )?;
+
+    // Ensure ASF cookies/envs are prepared for streaming opens
+    if args.remote_cache_dir.is_none() && zip_url.contains("asf.alaska.edu") {
+        let mut asf = AsfProvider::new(args.http_timeout);
+        let _ = asf.prepare();
+    }
 
     let reader = SafeReader::open_from_safe_zip_url(
         &href,
