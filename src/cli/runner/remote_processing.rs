@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{info, warn, debug};
 use gdal::raster::ResampleAlg;
+use indicatif::{ProgressBar, ProgressStyle};
 use sarpro::core::processing::save::{
     save_processed_image, save_processed_multiband_image_sequential,
 };
@@ -501,9 +502,48 @@ fn materialize_zip_if_requested(
         attempts += 1;
         if is_asf {
             // Use curl with netrc and cookie jar for ASF, enable resume and avoid overall max-time
-            let mut cmd = Command::new("curl");
             let resume_from = std::fs::metadata(&partial).map(|m| m.len()).unwrap_or(0);
+
+            // Create progress spinner for ASF downloads
+            let pb = ProgressBar::new_spinner();
             info!("ASF curl download: resume at {} of {:?}", resume_from, content_len_opt);
+
+            // Start monitoring thread for progress updates
+            let partial_path = partial.clone();
+            let pb_clone = pb.clone();
+            let monitor_handle = std::thread::spawn(move || {
+                // Get the current file size at start of monitoring (curl may have already written some data)
+                let mut last_size = std::fs::metadata(&partial_path).map(|m| m.len()).unwrap_or(resume_from);
+                while !pb_clone.is_finished() {
+                    if let Ok(metadata) = std::fs::metadata(&partial_path) {
+                        let current_size = metadata.len();
+                        if current_size != last_size {
+                            pb_clone.set_position(current_size);
+                            last_size = current_size;
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
+            });
+            if let Some(total_bytes) = content_len_opt {
+                pb.set_style(
+                    ProgressStyle::with_template(
+                        "{spinner:.green} [{elapsed_precise}] {bytes}/{total_bytes} ({percent}%) downloaded ({eta})"
+                    )
+                    .unwrap()
+                );
+                pb.set_length(total_bytes);
+                pb.set_position(resume_from); // Set initial position for resumable downloads
+            } else {
+                pb.set_style(
+                    ProgressStyle::with_template(
+                        "{spinner:.green} [{elapsed_precise}] {bytes} downloaded"
+                    )
+                    .unwrap()
+                );
+            }
+
+            let mut cmd = Command::new("curl");
             cmd.arg("-L")
                 .arg("--fail")
                 .arg("-sS")
@@ -518,6 +558,16 @@ fn materialize_zip_if_requested(
                 .arg("-o").arg(&partial)
                 .arg(&download_url);
             let status = cmd.status();
+
+            // Finish progress bar
+            if let Ok(metadata) = std::fs::metadata(&partial) {
+                pb.set_position(metadata.len());
+            }
+            pb.finish();
+
+            // Wait for monitoring thread to finish
+            let _ = monitor_handle.join();
+
             match status {
                 Ok(s) if s.success() => {
                     std::fs::rename(&partial, &local_path)
@@ -543,6 +593,10 @@ fn materialize_zip_if_requested(
             }
         } else {
             // Simple GET with redirects handled by client (CDSE and generic)
+
+            // Create progress spinner for CDSE downloads (always starts from 0, non-resumable)
+            let pb = ProgressBar::new_spinner();
+            
             let mut req = client.get(&download_url)
                 .header(reqwest::header::ACCEPT_ENCODING, "identity");
             if let Some(provider) = cdse.as_ref() {
@@ -551,16 +605,39 @@ fn materialize_zip_if_requested(
                 }
             }
             let resp = req.send();
+            if let Some(total_bytes) = content_len_opt {
+                pb.set_style(
+                    ProgressStyle::with_template(
+                        "{spinner:.green} [{elapsed_precise}] {bytes}/{total_bytes} ({percent}%) downloaded ({eta})"
+                    )
+                    .unwrap()
+                );
+                pb.set_length(total_bytes);
+            } else {
+                pb.set_style(
+                    ProgressStyle::with_template(
+                        "{spinner:.green} [{elapsed_precise}] {bytes} downloaded"
+                    )
+                    .unwrap()
+                );
+            }
             match resp {
                 Ok(r) if r.status().is_success() => {
                     let mut file = std::fs::File::create(&partial)
                         .map_err(|e| AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("open partial error: {}", e) })?;
-                    let mut body = r
+                    let body = r
                         .error_for_status()
                         .map_err(|e| AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("http status error: {}", e) })?;
-                    let copied = std::io::copy(&mut body, &mut file)
+
+                    // Use indicatif's built-in progress tracking
+                    let mut reader = pb.wrap_read(body);
+                    let copied = std::io::copy(&mut reader, &mut file)
                         .map_err(|e| AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("write error: {}", e) })?;
                     let _ = file.sync_all();
+
+                    // Finish progress bar
+                    pb.finish();
+
                     // Verify length when known
                     if let Some(total) = content_len_opt {
                         let have = std::fs::metadata(&partial).ok().map(|m| m.len()).unwrap_or(0);
@@ -583,13 +660,16 @@ fn materialize_zip_if_requested(
                     return Ok(local_path.to_string_lossy().to_string());
                 }
                 Ok(r) if r.status().as_u16() >= 500 || r.status().as_u16() == 429 => {
+                    pb.finish();
                     if attempts < max_retries { std::thread::sleep(std::time::Duration::from_millis(http_backoff_ms * attempts as u64)); continue; }
                     return Err(AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("http error {} after retries", r.status()) }.into());
                 }
                 Ok(r) => {
+                    pb.finish();
                     return Err(AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("http error {}", r.status()) }.into());
                 }
                 Err(e) => {
+                    pb.finish();
                     if attempts < max_retries { std::thread::sleep(std::time::Duration::from_millis(http_backoff_ms * attempts as u64)); continue; }
                     return Err(AppError::RemoteDirListing { url: download_url.to_string(), hint: format!("network error: {}", e) }.into());
                 }
