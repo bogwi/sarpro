@@ -674,7 +674,7 @@ fn materialize_zip_if_requested(
 
 pub fn process_safe_zip_url(args: &CliArgs) -> Result<(), Box<dyn std::error::Error>> {
     let zip_url = args.safe_zip_url.as_ref().unwrap();
-    let output = args.output.clone().ok_or(AppError::MissingArgument { arg: "--output".to_string() })?;
+    let output_arg = args.output.clone().ok_or(AppError::MissingArgument { arg: "--output".to_string() })?;
 
     // Map resample/target args
     let resample_alg = match args.resample_alg.as_deref() {
@@ -700,6 +700,32 @@ pub fn process_safe_zip_url(args: &CliArgs) -> Result<(), Box<dyn std::error::Er
         args.http_retries as u8,
         args.http_backoff_ms,
     )?;
+
+    // If --output is a directory, derive output filename from ZIP name
+    let output = if output_arg.is_dir() {
+        let fname = std::path::Path::new(&href)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("remote.SAFE.zip");
+        let fname_lc = fname.to_ascii_lowercase();
+        let stem: String = if fname_lc.ends_with(".safe.zip") {
+            fname[..fname.len() - ".SAFE.zip".len()].to_string()
+        } else if fname_lc.ends_with(".zip") {
+            fname[..fname.len() - ".zip".len()].to_string()
+        } else if fname_lc.ends_with(".safe") {
+            fname[..fname.len() - ".SAFE".len()].to_string()
+        } else {
+            fname.to_string()
+        };
+        let ext = match args.format { OutputFormat::TIFF => "tiff", OutputFormat::JPEG => "jpg" };
+        let out_name = format!("{}.{}", stem, ext);
+        let out_path = output_arg.join(out_name);
+        if let Some(parent) = out_path.parent() { let _ = std::fs::create_dir_all(parent); }
+        out_path
+    } else {
+        if let Some(parent) = std::path::Path::new(&output_arg).parent() { let _ = std::fs::create_dir_all(parent); }
+        output_arg
+    };
 
     // Ensure ASF cookies/envs are prepared for streaming opens
     if args.remote_cache_dir.is_none() && zip_url.contains("asf.alaska.edu") {

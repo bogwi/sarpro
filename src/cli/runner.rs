@@ -5,6 +5,8 @@ pub mod argument_mapping;
 pub mod input_validation;
 
 use tracing::info;
+use std::path::Path;
+use std::fs;
 
 use crate::cli::args::CliArgs;
 use crate::cli::errors::AppError;
@@ -65,9 +67,30 @@ pub fn run(args: CliArgs) -> Result<(), Box<dyn std::error::Error>> {
         let input = args.input.ok_or(AppError::MissingArgument {
             arg: "--input".to_string(),
         })?;
-        let output = args.output.ok_or(AppError::MissingArgument {
+        let output_arg = args.output.ok_or(AppError::MissingArgument {
             arg: "--output".to_string(),
         })?;
+        // If --output is an existing directory, derive the filename from input SAFE name
+        let output = if output_arg.is_dir() {
+            let input_name = input
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("output");
+            // Strip trailing .SAFE (case-insensitive) if present
+            let input_name_stripped = if input_name.to_ascii_lowercase().ends_with(".safe") {
+                &input_name[..input_name.len() - ".SAFE".len()]
+            } else {
+                input_name
+            };
+            let ext = match args.format { sarpro::types::OutputFormat::TIFF => "tiff", sarpro::types::OutputFormat::JPEG => "jpg" };
+            let file_name = format!("{}.{}", input_name_stripped, ext);
+            let out_path = output_arg.join(file_name);
+            if let Some(parent) = out_path.parent() { let _ = fs::create_dir_all(parent); }
+            out_path
+        } else {
+            if let Some(parent) = Path::new(&output_arg).parent() { let _ = fs::create_dir_all(parent); }
+            output_arg
+        };
 
         process_single_file(
             &input,
