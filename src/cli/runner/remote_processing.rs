@@ -852,6 +852,186 @@ pub fn process_safe_zip_dir_url(args: &CliArgs) -> Result<(), Box<dyn std::error
     Ok(())
 }
 
+/// Treat `--input-dir` as a remote HTTP directory containing unpacked `.SAFE` folders and process each one.
+/// This mirrors `process_safe_zip_dir_url` but targets unzipped SAFE directories instead of ZIP files.
+pub fn process_safe_dir_url(args: &CliArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let dir_url = args.input_dir.as_ref().unwrap();
+    let dir_url_str = dir_url.to_string_lossy();
+
+    if !args.batch {
+        warn!("--input-dir <URL> implies batch processing; add --batch to process all .SAFE folders");
+    }
+    let output_dir = args.output_dir.clone().ok_or(AppError::MissingArgument { arg: "--output-dir".to_string() })?;
+    fs::create_dir_all(&output_dir)?;
+
+    // Use GDAL VSI to list directory. Try plain /vsicurl and the option-style URL form.
+    let vsi_base = to_gdal_path(std::path::Path::new(dir_url_str.as_ref())).into_owned();
+    let vsi_with_slash = format!("{}/", vsi_base.trim_end_matches('/'));
+    // While allowed_extensions usually filters files, we still try it to hint VSICURL listing behavior
+    let opt_form = format!(
+        "/vsicurl?use_head=no&list_dir=yes&url={}",
+        dir_url_str
+    );
+    let opt_form_slash = format!(
+        "/vsicurl?use_head=no&list_dir=yes&url={}/",
+        dir_url_str.trim_end_matches('/')
+    );
+
+    let entries: Vec<PathBuf> = if let Ok(v) = gdal::vsi::read_dir(&vsi_with_slash, false) {
+        v
+    } else if let Ok(v) = gdal::vsi::read_dir(&vsi_with_slash, true) {
+        v
+    } else if let Ok(v) = gdal::vsi::read_dir(&vsi_base, false) {
+        v
+    } else if let Ok(v) = gdal::vsi::read_dir(&vsi_base, true) {
+        v
+    } else if let Ok(v) = gdal::vsi::read_dir(&opt_form_slash, false) {
+        v
+    } else if let Ok(v) = gdal::vsi::read_dir(&opt_form_slash, true) {
+        v
+    } else if let Ok(v) = gdal::vsi::read_dir(&opt_form, false) {
+        v
+    } else if let Ok(v) = gdal::vsi::read_dir(&opt_form, true) {
+        v
+    } else {
+        // Fallback: fetch listing via curl and parse .SAFE links/text
+        let url_with_slash = format!("{}/", dir_url_str.trim_end_matches('/'));
+        let out = Command::new("curl")
+            .arg("-L")
+            .arg("-s")
+            .arg(&url_with_slash)
+            .output();
+        match out {
+            Ok(o) if o.status.success() => {
+                let body = String::from_utf8_lossy(&o.stdout);
+                let mut names: Vec<String> = Vec::new();
+                // Parse hrefs
+                let mut start = 0usize;
+                while let Some(h) = body[start..].find("href=\"") {
+                    let i = start + h + 6;
+                    if let Some(end) = body[i..].find('"') {
+                        let candidate = &body[i..i + end];
+                        let cand_lc = candidate.to_lowercase();
+                        if cand_lc.ends_with(".safe/") || cand_lc.ends_with(".safe") {
+                            if !candidate.contains("://") && !candidate.starts_with('/') {
+                                names.push(candidate.trim_end_matches('/').to_string());
+                            } else if let Some(pos) = candidate.rsplit('/').next() {
+                                let pos_lc = pos.to_lowercase();
+                                if pos_lc.ends_with(".safe") || pos_lc.ends_with(".safe/") {
+                                    names.push(pos.trim_end_matches('/').to_string());
+                                }
+                            }
+                        }
+                        start = i + end + 1;
+                    } else {
+                        break;
+                    }
+                }
+                // Parse plain lines
+                for line in body.lines() {
+                    let t = line.trim();
+                    let t_lc = t.to_lowercase();
+                    if t_lc.ends_with(".safe") || t_lc.ends_with(".safe/") {
+                        let fname = t.split_whitespace().last().unwrap_or(t);
+                        names.push(fname.trim_end_matches('/').to_string());
+                    }
+                }
+                if names.is_empty() {
+                    return Err(AppError::RemoteDirListing {
+                        url: dir_url_str.to_string(),
+                        hint: "No .SAFE directories found. Ensure server lists directories or pass a direct --input URL to a .SAFE.".to_string(),
+                    }
+                    .into());
+                }
+                names.into_iter().map(PathBuf::from).collect()
+            }
+            _ => {
+                return Err(AppError::RemoteDirListing {
+                    url: dir_url_str.to_string(),
+                    hint: "Failed to fetch listing. Ensure the URL is reachable or use a local --input-dir.".to_string(),
+                }
+                .into());
+            }
+        }
+    };
+
+    // Filter entries to .SAFE folder names (strip any trailing slash if present)
+    let mut safes: Vec<String> = Vec::new();
+    for name_os in entries.iter() {
+        let mut name = name_os.to_string_lossy().to_string();
+        if name.ends_with('/') { name.pop(); } // remove trailing slash
+        let name_lc = name.to_lowercase();
+        if name_lc.ends_with(".safe") { safes.push(name); }
+    }
+
+    if safes.is_empty() {
+        warn!("No .SAFE directories found under {}", dir_url_str);
+        return Ok(());
+    }
+
+    info!("Found {} SAFE directories to process", safes.len());
+
+    // Map common params once
+    let resample_alg = match args.resample_alg.as_deref() {
+        Some("nearest") => Some(ResampleAlg::NearestNeighbour),
+        Some("bilinear") => Some(ResampleAlg::Bilinear),
+        Some("cubic") => Some(ResampleAlg::Cubic),
+        Some("lanczos") => Some(ResampleAlg::Lanczos),
+        _ => None,
+    };
+    let target_arg: Option<TargetCrsArg> = match args.target_crs.as_deref() {
+        Some(t) if t.eq_ignore_ascii_case("none") => Some(TargetCrsArg::None),
+        Some(t) if t.eq_ignore_ascii_case("auto") => Some(TargetCrsArg::Auto),
+        Some(t) => Some(TargetCrsArg::Custom(t.to_string())),
+        None => None,
+    };
+    let target_size = if args.size == "original" { None } else { Some(args.size.parse::<usize>().map_err(|_| AppError::InvalidSize { size: args.size.clone() })?) };
+
+    let mut processed = 0usize;
+    let mut errors = 0usize;
+
+    for safe_name in safes.into_iter() {
+        if safe_name == "." || safe_name == ".." { continue; }
+        let safe_url = format!("{}/{}", dir_url_str.trim_end_matches('/'), safe_name);
+        let out_name = format!("{}.{}", safe_name, match args.format { OutputFormat::TIFF => "tiff", OutputFormat::JPEG => "jpg" });
+        let out_path = output_dir.join(out_name);
+
+        info!("Processing remote SAFE directory: {} -> {:?}", safe_url, out_path);
+        let reader_res = SafeReader::open_from_safe_dir_url(
+            &safe_url,
+            args.polarization,
+            target_arg.clone(),
+            resample_alg,
+            target_size,
+        );
+
+        match reader_res {
+            Ok(reader) => {
+                let bit_depth_enum = match args.bit_depth { BitDepthArg::U8 => BitDepth::U8, BitDepthArg::U16 => BitDepth::U16 };
+                let save_res = resolve_polarization_and_save_image(
+                    &reader,
+                    args.polarization,
+                    out_path.as_path(),
+                    args.format,
+                    bit_depth_enum,
+                    target_size,
+                    args.synrgb_mode,
+                    args.pad,
+                    args.autoscale,
+                );
+                match save_res {
+                    Ok(_) => { processed += 1; info!("Done: {:?}", out_path); }
+                    Err(e) => { errors += 1; warn!("Error saving {:?}: {}", out_path, e); }
+                }
+            }
+            Err(e) => { errors += 1; warn!("Error opening {}: {}", safe_url, e); }
+        }
+    }
+
+    info!("Remote SAFE dir batch complete. processed={}, errors={}", processed, errors);
+    Ok(())
+}
+
 pub fn process_measurement_urls(args: &CliArgs) -> Result<(), Box<dyn std::error::Error>> {
     let output = args.output.clone().ok_or(AppError::MissingArgument { arg: "--output".to_string() })?;
     let resample_alg = match args.resample_alg.as_deref() {

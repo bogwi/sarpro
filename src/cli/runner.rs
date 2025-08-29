@@ -45,6 +45,16 @@ pub fn run(args: CliArgs) -> Result<(), Box<dyn std::error::Error>> {
         return process_safe_zip_dir_url(&args);
     }
 
+    // If --input-dir is an HTTP(S) URL, treat it as a remote directory of unpacked .SAFE folders
+    if let Some(input_dir) = args.input_dir.as_ref() {
+        if let Some(s) = input_dir.to_str() {
+            let s_trim = s.trim();
+            if s_trim.starts_with("http://") || s_trim.starts_with("https://") || s_trim.starts_with("/vsicurl/") {
+                return remote_processing::process_safe_dir_url(&args);
+            }
+        }
+    }
+
     if args.vv_url.is_some() || args.vh_url.is_some() || args.hh_url.is_some() || args.hv_url.is_some() {
         return process_measurement_urls(&args);
     }

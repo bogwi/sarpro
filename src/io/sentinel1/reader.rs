@@ -443,13 +443,93 @@ impl SafeReader {
         if base_vsi.ends_with('/') {
             base_vsi = base_vsi.trim_end_matches('/').to_string();
         }
-
-        // Build measurement directory path
+        // Build measurement directory candidates and list via VSI (try multiple variants)
         let measurement_dir = format!("{}/measurement", base_vsi);
+        let measurement_dir_slash = format!("{}/", measurement_dir.trim_end_matches('/'));
+        let href_trim = dir_href.trim();
+        let http_base = if href_trim.starts_with("/vsicurl/") {
+            &href_trim["/vsicurl/".len()..]
+        } else {
+            href_trim
+        };
+        let http_meas_slash = format!("{}/measurement/", http_base.trim_end_matches('/'));
+        let opt_form = format!(
+            "/vsicurl?use_head=no&list_dir=yes&url={}",
+            http_meas_slash.trim_end_matches('/')
+        );
+        let opt_form_slash = format!(
+            "/vsicurl?use_head=no&list_dir=yes&url={}/",
+            http_meas_slash.trim_end_matches('/')
+        );
 
-        // List measurement directory via VSI (non-recursive)
-        let entries = gdal::vsi::read_dir(&measurement_dir, false)
-            .map_err(|e| SafeError::Parse(format!("VSIReadDir error: {}", e)))?;
+        let entries: Vec<PathBuf> = if let Ok(v) = gdal::vsi::read_dir(&measurement_dir_slash, false) {
+            v
+        } else if let Ok(v) = gdal::vsi::read_dir(&measurement_dir_slash, true) {
+            v
+        } else if let Ok(v) = gdal::vsi::read_dir(&measurement_dir, false) {
+            v
+        } else if let Ok(v) = gdal::vsi::read_dir(&measurement_dir, true) {
+            v
+        } else if let Ok(v) = gdal::vsi::read_dir(&opt_form_slash, false) {
+            v
+        } else if let Ok(v) = gdal::vsi::read_dir(&opt_form_slash, true) {
+            v
+        } else if let Ok(v) = gdal::vsi::read_dir(&opt_form, false) {
+            v
+        } else if let Ok(v) = gdal::vsi::read_dir(&opt_form, true) {
+            v
+        } else {
+            // Fallback: fetch listing via curl and parse .tif/.tiff links or lines
+            let out = std::process::Command::new("curl")
+                .arg("-L")
+                .arg("-s")
+                .arg(&http_meas_slash)
+                .output();
+            match out {
+                Ok(o) if o.status.success() => {
+                    let body = String::from_utf8_lossy(&o.stdout);
+                    let mut names: Vec<String> = Vec::new();
+                    // Parse hrefs
+                    let mut start = 0usize;
+                    while let Some(h) = body[start..].find("href=\"") {
+                        let i = start + h + 6;
+                        if let Some(end) = body[i..].find('"') {
+                            let candidate = &body[i..i + end];
+                            let cand_lc = candidate.to_lowercase();
+                            if cand_lc.ends_with(".tif") || cand_lc.ends_with(".tiff") {
+                                if !candidate.contains("://") && !candidate.starts_with('/') {
+                                    names.push(candidate.to_string());
+                                } else if let Some(pos) = candidate.rsplit('/').next() {
+                                    let pos_lc = pos.to_lowercase();
+                                    if pos_lc.ends_with(".tif") || pos_lc.ends_with(".tiff") {
+                                        names.push(pos.to_string());
+                                    }
+                                }
+                            }
+                            start = i + end + 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    // Parse plain lines
+                    for line in body.lines() {
+                        let t = line.trim();
+                        let t_lc = t.to_lowercase();
+                        if t_lc.ends_with(".tif") || t_lc.ends_with(".tiff") {
+                            let fname = t.split_whitespace().last().unwrap_or(t);
+                            names.push(fname.to_string());
+                        }
+                    }
+                    if names.is_empty() {
+                        return Err(SafeError::Parse("VSIReadDir error: no TIFFs found under measurement".to_string()));
+                    }
+                    names.into_iter().map(PathBuf::from).collect()
+                }
+                _ => {
+                    return Err(SafeError::Parse("VSIReadDir error".to_string()));
+                }
+            }
+        };
 
         let mut vv_path: Option<PathBuf> = None;
         let mut vh_path: Option<PathBuf> = None;
@@ -457,12 +537,14 @@ impl SafeReader {
         let mut hv_path: Option<PathBuf> = None;
         let mut auto_crs_candidate: Option<PathBuf> = None;
 
+        // Determine the base VSI prefix to prepend to entry names
+        let meas_vsi_prefix = to_gdal_path(Path::new(&http_meas_slash));
         for rel in entries {
             let name_lc = rel.to_string_lossy().to_lowercase();
             if !(name_lc.ends_with(".tif") || name_lc.ends_with(".tiff")) {
                 continue;
             }
-            let full = PathBuf::from(format!("{}/{}", measurement_dir, rel.to_string_lossy()));
+            let full = PathBuf::from(format!("{}{}", meas_vsi_prefix.as_ref(), rel.to_string_lossy()));
 
             // Set AUTO CRS candidate from first TIFF found (will be overridden by vv/vh if present)
             if auto_crs_candidate.is_none() {
