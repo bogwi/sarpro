@@ -7,7 +7,7 @@ use sarpro::{AutoscaleStrategy, BitDepthArg, InputFormat, Polarization};
 #[derive(Parser)]
 #[command(name = "sarpro", version, about = "SARPRO CLI")]
 pub struct CliArgs {
-    /// Input SAFE directory (single file mode)
+    /// Input SAFE directory (single file mode) local or remote HTTP via GDAL VSI (unzipped .SAFE)
     #[arg(short, long)]
     pub input: Option<PathBuf>,
 

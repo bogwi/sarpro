@@ -428,6 +428,143 @@ impl SafeReader {
         })
     }
 
+    /// Open a SAFE directory (local path or HTTP URL) using GDAL VSI for directory listing and file access.
+    /// This mirrors `open_from_safe_zip_url` but assumes the input points directly to the `.SAFE` folder.
+    pub fn open_from_safe_dir_url(
+        dir_href: &str,
+        polarization: Polarization,
+        target_crs: Option<TargetCrsArg>,
+        resample_alg: Option<ResampleAlg>,
+        target_size: Option<usize>,
+    ) -> Result<Self, SafeError> {
+        // Map to GDAL VSI path (local passthrough or /vsicurl/...)
+        let mut base_vsi = to_gdal_path(Path::new(dir_href)).into_owned();
+        // Normalize trailing slash
+        if base_vsi.ends_with('/') {
+            base_vsi = base_vsi.trim_end_matches('/').to_string();
+        }
+
+        // Build measurement directory path
+        let measurement_dir = format!("{}/measurement", base_vsi);
+
+        // List measurement directory via VSI (non-recursive)
+        let entries = gdal::vsi::read_dir(&measurement_dir, false)
+            .map_err(|e| SafeError::Parse(format!("VSIReadDir error: {}", e)))?;
+
+        let mut vv_path: Option<PathBuf> = None;
+        let mut vh_path: Option<PathBuf> = None;
+        let mut hh_path: Option<PathBuf> = None;
+        let mut hv_path: Option<PathBuf> = None;
+        let mut auto_crs_candidate: Option<PathBuf> = None;
+
+        for rel in entries {
+            let name_lc = rel.to_string_lossy().to_lowercase();
+            if !(name_lc.ends_with(".tif") || name_lc.ends_with(".tiff")) {
+                continue;
+            }
+            let full = PathBuf::from(format!("{}/{}", measurement_dir, rel.to_string_lossy()));
+
+            // Set AUTO CRS candidate from first TIFF found (will be overridden by vv/vh if present)
+            if auto_crs_candidate.is_none() {
+                auto_crs_candidate = Some(full.clone());
+            }
+
+            if name_lc.contains("vv") {
+                vv_path = Some(full.clone());
+                auto_crs_candidate = Some(full.clone()); // Prefer VV for AUTO CRS
+                info!("Found VV file: {:?}", full);
+            } else if name_lc.contains("vh") {
+                vh_path = Some(full.clone());
+                if auto_crs_candidate.as_ref().map_or(true, |p| !p.to_string_lossy().to_lowercase().contains("vv")) {
+                    auto_crs_candidate = Some(full.clone()); // Prefer VH over non-VV/non-VH
+                }
+                info!("Found VH file: {:?}", full);
+            } else if name_lc.contains("hh") {
+                hh_path = Some(full.clone());
+                if auto_crs_candidate.as_ref().map_or(true, |p| {
+                    let p_lc = p.to_string_lossy().to_lowercase();
+                    !p_lc.contains("vv") && !p_lc.contains("vh")
+                }) {
+                    auto_crs_candidate = Some(full.clone()); // Prefer HH over non-polarimetric
+                }
+                info!("Found HH file: {:?}", full);
+            } else if name_lc.contains("hv") {
+                hv_path = Some(full.clone());
+                if auto_crs_candidate.as_ref().map_or(true, |p| {
+                    let p_lc = p.to_string_lossy().to_lowercase();
+                    !p_lc.contains("vv") && !p_lc.contains("vh")
+                }) {
+                    auto_crs_candidate = Some(full.clone()); // Prefer HV over non-polarimetric
+                }
+                info!("Found HV file: {:?}", full);
+            }
+        }
+
+        // Minimal metadata
+        let mut metadata = SafeMetadata {
+            product_type: "GRD".to_string(),
+            conversion_tool: "SARPRO".to_string(),
+            conversion_version: env!("CARGO_PKG_VERSION").to_string(),
+            conversion_timestamp: chrono::Utc::now().to_rfc3339(),
+            ..Default::default()
+        };
+
+        // Resolve effective target CRS once (using candidate from single-pass directory scan)
+        let effective_target_crs: Option<String> = match target_crs {
+            Some(TargetCrsArg::Custom(s)) => Some(s),
+            Some(TargetCrsArg::None) => None,
+            Some(TargetCrsArg::Auto) => {
+                auto_crs_candidate
+                    .as_ref()
+                    .and_then(|p| super::crs_utils::resolve_auto_target_crs_from_dataset_path(p))
+            }
+            None => None,
+        };
+
+        // Load each band based on the polarization mode - no match statement needed!
+        let vv_data = Self::load_band_for_polarization(polarization, Polarization::Vv, vv_path.as_ref().map(|p| p.as_path()), &mut metadata, effective_target_crs.as_deref(), resample_alg, target_size)?;
+        let vh_data = Self::load_band_for_polarization(polarization, Polarization::Vh, vh_path.as_ref().map(|p| p.as_path()), &mut metadata, effective_target_crs.as_deref(), resample_alg, target_size)?;
+        let hh_data = Self::load_band_for_polarization(polarization, Polarization::Hh, hh_path.as_ref().map(|p| p.as_path()), &mut metadata, effective_target_crs.as_deref(), resample_alg, target_size)?;
+        let hv_data = Self::load_band_for_polarization(polarization, Polarization::Hv, hv_path.as_ref().map(|p| p.as_path()), &mut metadata, effective_target_crs.as_deref(), resample_alg, target_size)?;
+
+        // Validate that required data was loaded - NO match statements at all!
+        // Check if polarization is Multiband or OP (without pattern matching)
+        let is_multiband_or_op = |pol: Polarization| -> bool {
+            pol == Polarization::Multiband || format!("{:?}", pol).starts_with("OP(")
+        };
+
+        // Check single bands individually
+        if polarization == Polarization::Vv && vv_data.is_none() {
+            return Err(SafeError::MissingField("VV measurement file"));
+        }
+        if polarization == Polarization::Vh && vh_data.is_none() {
+            return Err(SafeError::MissingField("VH measurement file"));
+        }
+        if polarization == Polarization::Hh && hh_data.is_none() {
+            return Err(SafeError::MissingField("HH measurement file"));
+        }
+        if polarization == Polarization::Hv && hv_data.is_none() {
+            return Err(SafeError::MissingField("HV measurement file"));
+        }
+
+        // Check multiband/operations
+        if is_multiband_or_op(polarization) {
+            if (vv_data.is_none() || vh_data.is_none()) && (hh_data.is_none() || hv_data.is_none()) {
+                return Err(SafeError::MissingField("VV/VH or HH/HV measurement pair"));
+            }
+        }
+
+        Ok(SafeReader {
+            base_path: PathBuf::from(base_vsi),
+            metadata,
+            product_type: ProductType::GRD,
+            vv_data,
+            vh_data,
+            hh_data,
+            hv_data,
+        })
+    }
+
     /// Open and parse a SAFE directory with polarization awareness
     pub fn open<P: AsRef<Path>>(
         safe_dir: P,
@@ -445,6 +582,13 @@ impl SafeReader {
         target_size: Option<usize>,
     ) -> Result<Self, SafeError> {
         let base = safe_dir.as_ref();
+        // Support remote SAFE directory URLs via GDAL VSI transparently
+        if let Some(href) = base.to_str() {
+            let href_trim = href.trim();
+            if href_trim.starts_with("http://") || href_trim.starts_with("https://") || href_trim.starts_with("/vsicurl/") {
+                return Self::open_from_safe_dir_url(href_trim, polarization, target_crs, resample_alg, target_size);
+            }
+        }
         match Self::open_dir_internal(base, polarization, target_crs, resample_alg, target_size, false)? {
             Some(reader) => Ok(reader),
             None => Err(SafeError::MissingField("Reader creation failed")), // This shouldn't happen in strict mode

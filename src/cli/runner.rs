@@ -30,7 +30,12 @@ pub fn run(args: CliArgs) -> Result<(), Box<dyn std::error::Error>> {
     // Validate input modes
     validate_input_modes(&args)?;
 
-    // Handle new remote/STAC modes (Step 3 implements remote explicit URLs and SAFE ZIP)
+    // Reserve STAC Item for Step 4 — currently not implemented
+    if let Some(item) = args.stac_item.as_ref() {
+        return Err(AppError::MissingArgument { arg: format!("--stac-item not implemented yet: {}", item) }.into());
+    }
+
+    // Handle new remote ZIP/explicit measurement modes
     if let Some(_) = args.safe_zip_url.as_ref() {
         return process_safe_zip_url(&args);
     }

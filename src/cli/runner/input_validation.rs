@@ -6,6 +6,7 @@ pub fn validate_input_modes(args: &CliArgs) -> Result<(), AppError> {
     let mut selected_modes = 0;
     if args.input.is_some() || args.input_dir.is_some() { selected_modes += 1; }
     if args.stac_item.is_some() { selected_modes += 1; }
+    // (no deprecated flags)
     if args.safe_zip_url.is_some() { selected_modes += 1; }
     if args.vv_url.is_some() || args.vh_url.is_some() || args.hh_url.is_some() || args.hv_url.is_some() { selected_modes += 1; }
     if args.safe_zip_dir_url.is_some() { selected_modes += 1; }
