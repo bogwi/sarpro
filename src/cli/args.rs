@@ -119,7 +119,7 @@ pub struct CliArgs {
     #[arg(long = "http-backoff-ms", default_value_t = 500u64)]
     pub http_backoff_ms: u64,
 
-    /// Optional directory for remote cache/materialization
+    /// Directory for remote cache/materialization (required for remote ZIPs)
     #[arg(long = "remote-cache-dir")]
     pub remote_cache_dir: Option<PathBuf>,
     

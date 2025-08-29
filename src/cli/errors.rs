@@ -30,4 +30,7 @@ pub enum AppError {
 
     #[error("Cannot list remote directory: {url}. {hint}")]
     RemoteDirListing { url: String, hint: String },
+
+    #[error("Provide --remote-cache-dir to cache and process: {url}. {hint}")]
+    CacheRequired { url: String, hint: String },
 }

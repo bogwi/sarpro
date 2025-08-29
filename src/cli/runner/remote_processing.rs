@@ -163,16 +163,10 @@ fn materialize_zip_if_requested(
 
     // If no cache dir requested, return original href (stream via VSIZIP+VSICURL)
     if cache_dir.is_none() {
-        // Prepare provider envs for streaming when needed
-        if is_asf {
-            let mut asf = AsfProvider::new(http_timeout_s);
-            let _ = asf.prepare();
-        }
-        if is_cdse {
-            let mut cdse = CdseProvider::new(http_timeout_s);
-            let _ = cdse.prepare();
-        }
-        return Ok(zip_href.to_string());
+        return Err(AppError::CacheRequired {
+            url: zip_href.to_string(),
+            hint: "Use --remote-cache-dir <PATH_TO_CACHE> to materialize downloads.".to_string(),
+        }.into());
     }
     let cache_dir = cache_dir.as_ref().unwrap();
     fs::create_dir_all(cache_dir)?;
