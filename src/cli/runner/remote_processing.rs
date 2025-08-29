@@ -714,11 +714,13 @@ pub fn process_safe_zip_dir_url(args: &CliArgs) -> Result<(), Box<dyn std::error
                     let i = start + h + 6; // position after href="
                     if let Some(end) = body[i..].find('"') {
                         let candidate = &body[i..i + end];
-                        if candidate.to_lowercase().ends_with(".safe.zip") {
+                        let cand_lc = candidate.to_lowercase();
+                        if cand_lc.ends_with(".safe.zip") || cand_lc.ends_with(".zip") {
                             if !candidate.contains("://") && !candidate.starts_with('/') {
                                 names.push(candidate.to_string());
                             } else if let Some(pos) = candidate.rsplit('/').next() {
-                                if pos.to_lowercase().ends_with(".safe.zip") {
+                                let pos_lc = pos.to_lowercase();
+                                if pos_lc.ends_with(".safe.zip") || pos_lc.ends_with(".zip") {
                                     names.push(pos.to_string());
                                 }
                             }
@@ -731,7 +733,8 @@ pub fn process_safe_zip_dir_url(args: &CliArgs) -> Result<(), Box<dyn std::error
                 // Parse plain lines
                 for line in body.lines() {
                     let t = line.trim();
-                    if t.to_lowercase().ends_with(".safe.zip") {
+                    let t_lc = t.to_lowercase();
+                    if t_lc.ends_with(".safe.zip") || t_lc.ends_with(".zip") {
                         let fname = t.split_whitespace().last().unwrap_or(t);
                         names.push(fname.to_string());
                     }
@@ -739,7 +742,7 @@ pub fn process_safe_zip_dir_url(args: &CliArgs) -> Result<(), Box<dyn std::error
                 if names.is_empty() {
                     return Err(AppError::RemoteDirListing {
                         url: dir_url.clone(),
-                        hint: "No .SAFE.zip entries found. Ensure server lists files or use --safe-zip-url.".to_string(),
+                        hint: "No .zip entries found. Ensure server lists files or use --safe-zip-url.".to_string(),
                     }
                     .into());
                 }
@@ -759,7 +762,7 @@ pub fn process_safe_zip_dir_url(args: &CliArgs) -> Result<(), Box<dyn std::error
     for name_os in entries.iter() {
         let name = name_os.to_string_lossy().to_string();
         let name_lc = name.to_lowercase();
-        if name_lc.ends_with(".safe.zip") {
+        if name_lc.ends_with(".safe.zip") || name_lc.ends_with(".zip") {
             zips.push(name);
         }
     }
@@ -801,8 +804,16 @@ pub fn process_safe_zip_dir_url(args: &CliArgs) -> Result<(), Box<dyn std::error
             args.http_retries as u8,
             args.http_backoff_ms,
         )?;
-        let safe_stem = zip_name.trim_end_matches(".SAFE.zip");
-        let out_name = format!("{}.{}", safe_stem, match args.format { OutputFormat::TIFF => "tiff", OutputFormat::JPEG => "jpg" });
+        // Derive output stem for both ".SAFE.zip" (CDSE) and plain ".zip" (ASF)
+        let name_lc = zip_name.to_lowercase();
+        let out_stem: String = if name_lc.ends_with(".safe.zip") {
+            zip_name[..zip_name.len() - ".SAFE.zip".len()].to_string()
+        } else if name_lc.ends_with(".zip") {
+            zip_name[..zip_name.len() - ".zip".len()].to_string()
+        } else {
+            zip_name.clone()
+        };
+        let out_name = format!("{}.{}", out_stem, match args.format { OutputFormat::TIFF => "tiff", OutputFormat::JPEG => "jpg" });
         let out_path = output_dir.join(out_name);
 
         info!("Processing remote SAFE ZIP: {} -> {:?}", href, out_path);
