@@ -169,7 +169,7 @@ pub fn process_safe_to_path(input: &Path, output: &Path, params: &ProcessingPara
 
 /// Internal helper to mirror `process_safe_to_path` but accept `ProcessingOptions`.
 /// For Phase 1 this simply maps to the same behavior as `ProcessingParams`.
-pub(crate) fn process_safe_to_path_with_options(
+pub(crate) fn _process_safe_to_path_with_options(
     input: &Path,
     output: &Path,
     opts: &crate::core::params::ProcessingOptions,
