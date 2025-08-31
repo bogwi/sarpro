@@ -13,7 +13,7 @@ use crate::cli::errors::AppError;
 
 use self::single_file::process_single_file;
 use self::batch_processing::process_batch;
-use self::remote_processing::{process_safe_zip_url, process_safe_zip_dir_url, process_measurement_urls};
+use self::remote_processing::{process_safe_zip_url, process_measurement_urls};
 use self::argument_mapping::build_processing_options_from_args;
 use self::input_validation::validate_input_modes;
 
@@ -40,11 +40,6 @@ pub fn run(args: CliArgs) -> Result<(), Box<dyn std::error::Error>> {
     // Handle new remote ZIP/explicit measurement modes
     if let Some(_) = args.safe_zip_url.as_ref() {
         return process_safe_zip_url(&args);
-    }
-
-    // Handle remote directory of SAFE ZIPs for batch processing via VSICURL directory listing
-    if let Some(_) = args.safe_zip_dir_url.as_ref() {
-        return process_safe_zip_dir_url(&args);
     }
 
     // If --input-dir is an HTTP(S) URL, treat it as a remote directory of unpacked .SAFE folders

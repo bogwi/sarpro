@@ -84,11 +84,6 @@ pub struct CliArgs {
     #[arg(long = "safe-zip-url")]
     pub safe_zip_url: Option<String>,
 
-    /// Treat a remote URL as a directory and list SAFE ZIPs via GDAL VSICURL
-    /// Example: --safe-zip-dir-url http://127.0.0.1:8000/ZIPs
-    #[arg(long = "safe-zip-dir-url")]
-    pub safe_zip_dir_url: Option<String>,
-
     /// Explicit measurement URLs (VSICURL). Use with --polarization appropriately
     #[arg(long = "vv-url")]
     pub vv_url: Option<String>,

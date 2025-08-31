@@ -70,7 +70,8 @@ pub fn derive_output_path_for_zip(href: &str, output_arg: &Path, format: OutputF
     }
 }
 
-pub fn list_remote_zip_entries(dir_url: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+// This function is kept for reference only; it is not used anywhere.
+pub fn _list_remote_zip_entries(dir_url: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let vsi_base = to_gdal_path(std::path::Path::new(dir_url)).into_owned();
     let vsi_with_slash = format!("{}/", vsi_base.trim_end_matches('/'));
     let opt_form = format!(
