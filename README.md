@@ -19,7 +19,7 @@ A high-performance Sentinel-1 Synthetic Aperture Radar (SAR) GRD product to imag
 ## ROADMAP and ROADMAP_explained
 See [ROADMAP.md](ROADMAP.md) for the high‑level phases and upcoming features. See [ROADMAP_explained.md](ROADMAP_explained.md) for the detailed technical explanation. This highlights what’s coming (COG/STAC, masking, speckle filters, DEM‑based RTC, tiling, time‑series) and expected release groupings.
 
-*Note 1: The ROADMAP and its technical explanation might change at any moment prioritizing some features over others or adding new ones and slicing some out. Yet it was created to be a minimal-refactor plan and as orgranic as possible, though not a contract.*
+*Note 1: The ROADMAP and its technical explanation might change at any moment prioritizing some features over others or adding new ones and slicing some out. Yet it was created to be a minimal-refactor plan and as organic as possible, though not a contract.*
 
 *Note 2: The ROADMAP and its technical explanation can have mistakes and knowledge gaps which as our understanding of the project deepens will be eliminated or treated as opinionated.*
 
@@ -29,10 +29,10 @@ Visit [CHANGELOG.md](CHANGELOG.md) to track the changes.
 ## Best Usage Practices
 
 ### What SARPRO Can Do Now
-- **CLI: Download CDSE (dataspace.copernicus.eu) and ASF (asf.alaska.edu) SAFE ZIPs**: Get and process SAFE ZIPs from remote CDSE/ASF sources with full auth flow and materialize them into cache.
+- **CLI: Download CDSE (dataspace.copernicus.eu) and ASF (asf.alaska.edu) SAFE ZIPs**: Get and process SAFE ZIPs from remote CDSE/ASF sources with full authentication flow and materialize them into cache.
 - - Flags: `--safe-zip-url <URL>`, `--remote-cache-dir <PATH/TO/CACHE>`, `--output <PATH/TO/OUTPUT/NAME.jpg|tiff>`, `--output-dir <PATH/TO/OUTPUT/>`
 
-- - Download a SAFE ZIP from CDSE and processes it into a TIFF file. 
+- - Download a SAFE ZIP from CDSE and process it into a TIFF file. 
 ```bash 
 CDSE_ZIP_URL="https://download.dataspace.copernicus.eu/odata/v1/Products(e1499d5b-6e3f-40c1-9c09-d6afe4fdcfeb)/$value"
 cargo run --bin sarpro -- --safe-zip-url "$CDSE_ZIP_URL" \
@@ -40,7 +40,7 @@ cargo run --bin sarpro -- --safe-zip-url "$CDSE_ZIP_URL" \
     --output /tmp/ --format tiff --polarization vv \
     --size 1024 --log --target-crs auto
 ```
-- -  Download a SAFE ZIP from ASF and processes it into a JPEG file.
+- -  Download a SAFE ZIP from ASF and process it into a JPEG file.
 ```bash
 ASF_ZIP_URL="https://datapool.asf.alaska.edu/GRD_HD/SA/S1A_IW_GRDH_1SDV_20250827T225857_20250827T225922_060728_078ECD_5BCB.zip"
 cargo run --bin sarpro -- --safe-zip-url "$ASF_ZIP_URL" \
@@ -49,10 +49,10 @@ cargo run --bin sarpro -- --safe-zip-url "$ASF_ZIP_URL" \
     --size 1024 --log --target-crs auto
 ```
 - - *Note 1: Use `--output /path/to/output/name.jpg|tiff` to set the output filename directory and the name of the file. If the name is not set, like in the CDSE example, the default is the canonical filename of the .SAFE file.*
-- - *Note 2: If the .SAFE.zip asset was already materialized into cache, it will be used from cache instead of downloading again. And naturally once downloaded as .zip it can be processed over again. Upacking will dramatically reduse the processing time. The is especially valid for ASF assets as they are packed to half the size in .zip. CDSE GRD assets are typicaly the full size zips.*
-- - *Note 3: See [Credentials (CDSE, ASF): setup, discovery, and runtime behavior](#credentials-cdse-asf-setup-discovery-and-runtime-behavior) below for details how to set authentication for remote ZIPs. It's as simple as setting the environment variables `CDSE_CLIENT_ID` and `CDSE_CLIENT_SECRET` or `SARPRO_NETRC`.*
+- - *Note 2: If the .SAFE.zip asset was already materialized into cache, it will be used from cache instead of downloading again. And naturally once downloaded as .zip it can be processed over again. Unpacking will dramatically reduce the processing time. This is especially valid for ASF assets as they are packed to half the size in .zip. CDSE GRD assets are typically the full size zips.*
+- - *Note 3: See [Credentials (CDSE, ASF): setup, discovery, and runtime behavior](#credentials-cdse-asf-setup-discovery-and-runtime-behavior) below for details on how to set authentication for remote ZIPs. It's as simple as setting the environment variables `CDSE_CLIENT_ID` and `CDSE_CLIENT_SECRET` or `SARPRO_NETRC`.*
 ---
-- **CLI: In addition to processing local unpacked SAFE file and directories, SARPRO can also process remote ones that does not require authentication flow**  (tested with **nginx**(recommended) and **python** **RangeHTTPServer**). Accessing remotes behind the local network should not introduce much overhead.
+- **CLI: In addition to processing local unpacked SAFE files and directories, SARPRO can also process remote ones that do not require authentication flow** (tested with **nginx**(recommended) and **python** **RangeHTTPServer**). Accessing remotes behind the local network should not introduce much overhead.
 - - *Flags you need*: `--input <PATH_OR_URL>` and `--input-dir <PATH_OR_URL>`
 - - Process a remote unpacked SAFE asset:
 ```bash
@@ -71,7 +71,7 @@ cargo run --bin sarpro -- --safe-zip-url "$ASF_ZIP_URL" \
 ```
 - - *Note: `GRD` is a placeholder for a directory containing unpacked SAFE files served by a server or on your local filesystem.*
 ---
-- **What about downloading from an asorted lists of urls, say urls.txt?**
+- **What about downloading from an assorted list of URLs, say urls.txt?**
 ```
 https://datapool.asf.alaska.edu/GRD_HD/SA/S1A_IW_GRDH_1SDV_20240516T225933_20240516T225958_053903_068D39_BA0C.zip
 https://datapool.asf.alaska.edu/GRD_HD/SA/S1A_IW_GRDH_1SDV_20240528T225908_20240528T225933_054078_069350_95E2.zip
@@ -87,7 +87,7 @@ chmod +x sarpro_intake_cdse_asf_urls.sh
 python sarpro_intake_cdse_asf_urls.py
 ```
 - - *Note: The urls.txt can have GRD assets to be downloaded, resumed, or already materialized into cache. SARPRO will process them all.*
-- - *Important! ASF assets can be resumed at any time, CDSE assets can not (at least not with the current implementation) and will be re-downloaded after an interruption.*
+- - *Important! ASF assets can be resumed at any time, CDSE assets cannot (at least not with the current implementation) and will be re-downloaded after an interruption.*
 ---
 - **Convert Sentinel‑1 GRD .SAFE to map‑ready GeoTIFFs (u8/u16)**: Single‑band VV/VH/HH/HV or dual‑band multiband TIFFs with embedded geotransform/projection. Optional reprojection to a target CRS (e.g., `EPSG:4326`, `EPSG:32633`) with `--target-crs` and resampling (`--resample-alg nearest|bilinear|cubic|lanczos`).
 - **Produce high‑quality quicklooks (JPEG) with sidecars**: Grayscale or synthetic RGB JPEGs, plus `.json` metadata, `.jgw/.wld` worldfile, and `.prj` projection. Great for catalogs and reports.
@@ -209,7 +209,7 @@ SARPRO delivers excellent layer separation in synthetic RGB JPEGs, even in highl
 3. **Custom Integration**: Use the library API for specialized processing chains or integration with existing systems
 
 ### About using reprojection or not
-Setting reprojection to `--target-crs none` or ommiting it preserves native geometry just as it is packed in the SAFE product.
+Setting reprojection to `--target-crs none` or omitting it preserves native geometry just as it is packed in the SAFE product.
 
 #### When native/no-reprojection is useful:  
 - Quantitative workflows that avoid resampling:

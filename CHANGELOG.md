@@ -1,7 +1,7 @@
 ### Changelog
 
 
-### [0.3.2] - 2025-08-31 (in-progress)
+### [0.3.2] - 2025-08-31 (released)
 
 - **Overview**:
   - Major expansion of remote data access and batch processing capabilities, enabling robust, credentialed ingestion of Sentinel-1 GRD products from cloud providers (CDSE, ASF) and direct HTTP(S) sources. This release delivers the core of Phase 1 remote I/O and credential management, with a focus on production reliability and flexible input modes.
@@ -19,7 +19,9 @@
 - **Docs**:
   - Updated README and CLI help to document new remote and batch processing features, credential setup, and recommended workflows.
 
-- *Note*: These features are CLI only. They will find their way into the library API and GUI in future releases.
+- **Important**:
+  - The new remote SAFE ZIP and credentialed access features (including `--safe-zip-url` and `--remote-cache-dir`) are CLI-only in 0.3.2 and are not yet exposed via the public library API or GUI.
+  - They are planned for 0.4.0, where the API will gain typed inputs/IO/credential options and the GUI will expose equivalent controls.
 
 ### [0.3.1] - 2025-08-21 (unreleased)
 
