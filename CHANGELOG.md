@@ -1,6 +1,26 @@
 ### Changelog
 
 
+### [0.3.2] - 2025-08-31 (in-progress)
+
+- **Overview**:
+  - Major expansion of remote data access and batch processing capabilities, enabling robust, credentialed ingestion of Sentinel-1 GRD products from cloud providers (CDSE, ASF) and direct HTTP(S) sources. This release delivers the core of Phase 1 remote I/O and credential management, with a focus on production reliability and flexible input modes.
+
+- **Highlights**:
+  - **Remote I/O via VSICURL/VSIZIP**: Seamless reading of remote SAFE ZIPs and direct measurement band URLs using GDAL's virtual file system. Supports both streaming and materialization strategies, with automatic handling based on cache directory settings.
+  - **Credentialed Access**: Domain-scoped credential provider for CDSE (OAuth2 client credentials) and ASF (netrc/cookie/token), with secure environment variable and file-based discovery. Credentials are never embedded in URLs; clear setup guidance included.
+  - **New CLI options and features**:
+    - `--safe-zip-url`, will allow to download and process SAFE ZIPs from remote CDSE/ASFsources with full auth flow.
+    - `--remote-cache-dir` to set the cache directory.
+    - `--input` and `--input-dir` now accept remote HTTP(S) URLs for unpacked SAFE fles and directories without auth flow.
+  - **Robust Download and Resume**: Materialized ZIPs are cached. Partial downloads for ASF assets are retried or restarted as needed, with progress indication and canonical filename resolution.
+  - **Refactoring and Reliability**: Internal refactors to unify polarization resolution, split large modules, and improve error reporting. ProcessingOptions aggregate is now threaded end-to-end, ensuring future extensibility.
+
+- **Docs**:
+  - Updated README and CLI help to document new remote and batch processing features, credential setup, and recommended workflows.
+
+- *Note*: These features are CLI only. They will find their way into the library API and GUI in future releases.
+
 ### [0.3.1] - 2025-08-21 (unreleased)
 
 - **Docs**:

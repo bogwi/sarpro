@@ -14,13 +14,14 @@ A high-performance Sentinel-1 Synthetic Aperture Radar (SAR) GRD product to imag
 - **I/O Optimized**: Performance typically limited by disk I/O, not CPU processing
 - **since v0.2.0**: Can now reproject to any CRS and resample with nearest, bilinear, cubic, or lanczos algorithms
 - **since v0.3.0**: Can now automatically detect the target CRS from the product metadata and use it for reprojection. Also new benefit from the new CLAHE autoscale strategy which provides great layer separation in synthetic RGB JPEGs.
+- **since v0.3.2**: Can now process SAFE ZIPs from remote CDSE/ASF sources with full authentication flow and materialize them into cache (CLI only). See [Credentials (CDSE, ASF): setup, discovery, and runtime behavior](#credentials-cdse-asf-setup-discovery-and-runtime-behavior) below for details.
 
 ## ROADMAP and ROADMAP_explained
 See [ROADMAP.md](ROADMAP.md) for the high‑level phases and upcoming features. See [ROADMAP_explained.md](ROADMAP_explained.md) for the detailed technical explanation. This highlights what’s coming (COG/STAC, masking, speckle filters, DEM‑based RTC, tiling, time‑series) and expected release groupings.
 
 *Note 1: The ROADMAP and its technical explanation might change at any moment prioritizing some features over others or adding new ones and slicing some out. Yet it was created to be a minimal-refactor plan and as orgranic as possible, though not a contract.*
 
-*Note 2: The ROADMAP and its technical explanation can have mistakes and knowledge gaps which as my understanding of the project deepens will be eliminated or treated as opinionated.*
+*Note 2: The ROADMAP and its technical explanation can have mistakes and knowledge gaps which as our understanding of the project deepens will be eliminated or treated as opinionated.*
 
 ## CHANGELOG
 Visit [CHANGELOG.md](CHANGELOG.md) to track the changes. 
@@ -28,7 +29,66 @@ Visit [CHANGELOG.md](CHANGELOG.md) to track the changes.
 ## Best Usage Practices
 
 ### What SARPRO Can Do Now
+- **CLI: Download CDSE (dataspace.copernicus.eu) and ASF (asf.alaska.edu) SAFE ZIPs**: Get and process SAFE ZIPs from remote CDSE/ASF sources with full auth flow and materialize them into cache.
+- - Flags: `--safe-zip-url <URL>`, `--remote-cache-dir <PATH/TO/CACHE>`, `--output <PATH/TO/OUTPUT/NAME.jpg|tiff>`, `--output-dir <PATH/TO/OUTPUT/>`
 
+- - Download a SAFE ZIP from CDSE and processes it into a TIFF file. 
+```bash 
+CDSE_ZIP_URL="https://download.dataspace.copernicus.eu/odata/v1/Products(e1499d5b-6e3f-40c1-9c09-d6afe4fdcfeb)/$value"
+cargo run --bin sarpro -- --safe-zip-url "$CDSE_ZIP_URL" \
+    --remote-cache-dir /tmp/sarpro_cache \
+    --output /tmp/ --format tiff --polarization vv \
+    --size 1024 --log --target-crs auto
+```
+- -  Download a SAFE ZIP from ASF and processes it into a JPEG file.
+```bash
+ASF_ZIP_URL="https://datapool.asf.alaska.edu/GRD_HD/SA/S1A_IW_GRDH_1SDV_20250827T225857_20250827T225922_060728_078ECD_5BCB.zip"
+cargo run --bin sarpro -- --safe-zip-url "$ASF_ZIP_URL" \
+    --remote-cache-dir /tmp/sarpro_cache \
+    --output /tmp/asf_ok.jpg --format jpeg --polarization multiband \
+    --size 1024 --log --target-crs auto
+```
+- - *Note 1: Use `--output /path/to/output/name.jpg|tiff` to set the output filename directory and the name of the file. If the name is not set, like in the CDSE example, the default is the canonical filename of the .SAFE file.*
+- - *Note 2: If the .SAFE.zip asset was already materialized into cache, it will be used from cache instead of downloading again. And naturally once downloaded as .zip it can be processed over again. Upacking will dramatically reduse the processing time. The is especially valid for ASF assets as they are packed to half the size in .zip. CDSE GRD assets are typicaly the full size zips.*
+- - *Note 3: See [Credentials (CDSE, ASF): setup, discovery, and runtime behavior](#credentials-cdse-asf-setup-discovery-and-runtime-behavior) below for details how to set authentication for remote ZIPs. It's as simple as setting the environment variables `CDSE_CLIENT_ID` and `CDSE_CLIENT_SECRET` or `SARPRO_NETRC`.*
+---
+- **CLI: In addition to processing local unpacked SAFE file and directories, SARPRO can also process remote ones that does not require authentication flow**  (tested with **nginx**(recommended) and **python** **RangeHTTPServer**). Accessing remotes behind the local network should not introduce much overhead.
+- - *Flags you need*: `--input <PATH_OR_URL>` and `--input-dir <PATH_OR_URL>`
+- - Process a remote unpacked SAFE asset:
+```bash
+--input http://127.0.0.1:8999/GRD/...F07D.SAFE
+...
+```
+- - Process a remote directory of unpacked SAFE files:
+```bash
+--input-dir http://127.0.0.1:8999/GRD/
+...
+```
+- - Or process the entire local directory of unpacked SAFE files, which is the fastest way to process a large number of SAFE files.
+```bash
+--input-dir /path/to/GRD
+...
+```
+- - *Note: `GRD` is a placeholder for a directory containing unpacked SAFE files served by a server or on your local filesystem.*
+---
+- **What about downloading from an asorted lists of urls, say urls.txt?**
+```
+https://datapool.asf.alaska.edu/GRD_HD/SA/S1A_IW_GRDH_1SDV_20240516T225933_20240516T225958_053903_068D39_BA0C.zip
+https://datapool.asf.alaska.edu/GRD_HD/SA/S1A_IW_GRDH_1SDV_20240528T225908_20240528T225933_054078_069350_95E2.zip
+https://datapool.asf.alaska.edu/GRD_HD/SA/S1A_IW_GRDH_1SDV_20250411T110554_20250411T110623_058708_07455A_3328.zip
+https://download.dataspace.copernicus.eu/odata/v1/Products(82fcf068-c4df-4735-87d1-7eb9aad4b231)/$value
+```
+Support for a native flag `--input-list <PATH/TO/LIST/OF/URLS>` is coming soon. In the meantime, see [`sarpro_intake_cdse_asf_urls.sh`](sarpro_intake_cdse_asf_urls.sh) (Bash, Linux/macOS) and [`sarpro_intake_cdse_asf_urls.py`](sarpro_intake_cdse_asf_urls.py) (Python, cross-platform) for robust, parallel batch processing from a list of URLs.
+```bash
+chmod +x sarpro_intake_cdse_asf_urls.sh
+./sarpro_intake_cdse_asf_urls.sh
+```
+```python
+python sarpro_intake_cdse_asf_urls.py
+```
+- - *Note: The urls.txt can have GRD assets to be downloaded, resumed, or already materialized into cache. SARPRO will process them all.*
+- - *Important! ASF assets can be resumed at any time, CDSE assets can not (at least not with the current implementation) and will be re-downloaded after an interruption.*
+---
 - **Convert Sentinel‑1 GRD .SAFE to map‑ready GeoTIFFs (u8/u16)**: Single‑band VV/VH/HH/HV or dual‑band multiband TIFFs with embedded geotransform/projection. Optional reprojection to a target CRS (e.g., `EPSG:4326`, `EPSG:32633`) with `--target-crs` and resampling (`--resample-alg nearest|bilinear|cubic|lanczos`).
 - **Produce high‑quality quicklooks (JPEG) with sidecars**: Grayscale or synthetic RGB JPEGs, plus `.json` metadata, `.jgw/.wld` worldfile, and `.prj` projection. Great for catalogs and reports.
 - **Generate synthetic RGB from dual‑pol scenes**: Combine co‑pol and cross‑pol pairs (VV+VH or HH+HV) into visually compelling composites for exploration and communication.
@@ -41,7 +101,7 @@ Visit [CHANGELOG.md](CHANGELOG.md) to track the changes.
 - **Use a GUI for local, interactive runs**: Select SAFE folders, tweak parameters, monitor progress, and auto‑generate equivalent CLI commands.
 - **Integrate as a Rust library**: Call the typed API to get in‑memory buffers or write outputs directly from your application, reusing SARPRO’s autoscaling and writers.
 
-Where SARPRO v0.3.0 fits today (GRD):
+### Where SARPRO v0.3.2 fits today (GRD):
 - **Exploratory analysis and visualization**: Rapidly turn SAFE into publication‑quality figures and synRGB quicklooks for urban, agriculture, water, and disaster contexts.
 - **Internal data catalogs**: Generate standardized JPEG quicklooks and GeoTIFFs with consistent sizing for fast browsing and indexing.
 - **ML dataset preparation**: Create reproducible grayscale or multiband inputs with fixed sizes/padding, ready for training/evaluation.
@@ -55,6 +115,65 @@ Where SARPRO v0.3.0 fits today (GRD):
 - **GUI**: Best for local work and interactive processing. Use when you need visual feedback, parameter experimentation, or one-off processing tasks on your local machine.
 
 - **Library**: For experimentation and when you need direct access to core processing functions. Integrate SARPRO capabilities into your own Rust applications.
+
+## Credentials (CDSE, ASF): setup, discovery, and runtime behavior
+
+### Purpose
+- Document exactly how SARPRO discovers and applies credentials per provider, for both materialized and streaming I/O, including file precedence, env vars, cookies, and progress preflight.
+
+### Credential discovery (runtime precedence)
+- CDSE (dataspace.copernicus.eu)
+  - Env: `CDSE_CLIENT_ID`, `CDSE_CLIENT_SECRET` (OAuth2 client_credentials)
+  - On first use, SARPRO exchanges for a bearer token at `.../openid-connect/token` and injects `Authorization: Bearer <token>` into HTTP requests.
+  - Token is cached in‑process with expiry; on 401 it is refreshed and the request retried.
+  - For streaming via GDAL, the same Authorization can be applied through GDAL config (`GDAL_HTTP_HEADERS`) when needed.
+- ASF (asf.alaska.edu)
+  - Netrc precedence (first found is used):
+    1) `SARPRO_NETRC` (absolute path you provide)
+    2) Repo‑local `sarpro/.netrc`
+    3) User `~/.netrc`
+  - Required entry: `machine urs.earthdata.nasa.gov login <username> password <password>`; file must be `chmod 600`.
+  - Cookies: persisted under `~/.sarpro/asf_cookies.txt` and applied to both curl and GDAL (`GDAL_HTTP_COOKIEFILE/JAR`).
+
+### Materialize vs stream (ZIP handling)
+- Materialize (`--remote-cache-dir` is set)
+  - CDSE: downloaded with reqwest using Authorization; canonical filename is resolved via `Content‑Disposition` or OData `?$select=Name` and cached.
+  - ASF: downloaded with `curl` using `--netrc-file` and cookie jar; resume enabled with `-C -`, retries and backoff configured; canonical filename comes from the URL tail.
+- Stream (no cache dir)
+  - Both providers use GDAL VSI paths (`/vsizip//vsicurl/...`); CDSE headers/cookies and ASF cookies are applied via GDAL config so range requests and auth flow through GDAL.
+
+### Preflight and progress (provider‑agnostic)
+- Before download SARPRO attempts to determine size and filename:
+  1) Authenticated `HEAD` (via curl for ASF, reqwest for CDSE) → parse `Content‑Length` and `Content‑Disposition`.
+  2) If size unknown, authenticated `Range: bytes=0-0` → parse `Content‑Range` total.
+  3) CDSE only (fallback): OData `?$select=Name,ContentLength`.
+- The resolved `content_length` drives a determinate progress bar; if unavailable, progress is shown as indeterminate.
+
+### Security & operational notes
+- No credentials are ever embedded in input URLs; all auth is via env variables, netrc, and cookies.
+- Ensure `.netrc` is `chmod 600`; otherwise servers may ignore it and GDAL/curl may refuse to use it.
+- CDSE `$value` endpoints may not support HTTP Range; resume is therefore best‑effort. ASF datapool supports Range and robust resume.
+
+### Troubleshooting
+- 401/403 (ASF): verify `.netrc` host is exactly `urs.earthdata.nasa.gov` and permissions are `600`; remove stale cookies if needed.
+- 401/403 (CDSE): verify `CDSE_CLIENT_ID/SECRET`; re‑try after token refresh; confirm the product UUID is accessible.
+- Missing progress size: some origins suppress `Content‑Length`; the Range preflight or OData fallback should populate it when possible.
+
+### Examples
+```bash
+# Point SARPRO to a custom netrc file for ASF
+export SARPRO_NETRC=/secure/path/earthdata.netrc
+chmod 600 "$SARPRO_NETRC"
+
+# CDSE OAuth2
+export CDSE_CLIENT_ID=...
+export CDSE_CLIENT_SECRET=...
+```
+
+That's it! 
+
+### Acceptance
+- With valid credentials, both providers work in materialized and streaming modes; size/name preflight is populated in logs; ASF downloads are resumable.
 
 ### Performance Expectations
 
@@ -232,8 +351,8 @@ cargo run --release --bin sarpro -- -i data.SAFE -o output.tiff \
 
 #### Available Options
 
-- `--input, -i`: Input SAFE directory (single file mode)
-- `--input-dir`: Input directory containing SAFE subdirectories (batch mode)
+- `--input, -i`: Input SAFE local path or remote non-authenticated HTTP(S) URL (single file mode)
+- `--input-dir`: Input local path or remote non-authenticated HTTP(S) URL directory containing SAFE files (batch mode)
 - `--output, -o`: Output filename (single file mode)
 - `--output-dir`: Output directory for batch processing
 - `--format, -f`: Output format (`tiff` or `jpeg`)
@@ -248,6 +367,9 @@ cargo run --release --bin sarpro -- -i data.SAFE -o output.tiff \
 
 - `--target-crs`: Optional target CRS for map reprojection (e.g., `EPSG:4326`, `EPSG:32633`). Special values: `auto` (detect UTM zone from metadata), `none` (disable reprojection)
 - `--resample-alg`: Resampling algorithm for reprojection (`nearest`, `bilinear`, `cubic`, `lanczos`) — default: `lanczos`
+- `--safe-zip-url`: Optional remote CDSE(dataspace.copernicus.eu) or ASF(asf.alaska.edu) SAFE ZIP URL to download and process with full authentication flow.
+- `--remote-cache-dir`: Remote cache directory to materialize the SAFE ZIP (mandatory for remote ZIPs).
+
 
 ### Graphical User Interface (GUI)
 

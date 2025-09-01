@@ -75,14 +75,13 @@ pub struct CliArgs {
     #[arg(long = "synrgb-mode", value_enum, default_value_t = SyntheticRgbMode::Default)]
     pub synrgb_mode: SyntheticRgbMode,
 
-    // --- Phase 1 additions (non-breaking) ---
-    /// Load inputs from a STAC Item (local file path or HTTP URL)
-    #[arg(long = "stac-item")]
-    pub stac_item: Option<String>,
-
-    /// Open a remote SAFE packaged as a ZIP via VSICURL/VSIZIP
+    /// Open a remote authenticated CDSE/ASF SAFE packaged as a ZIP via VSICURL/VSIZIP
     #[arg(long = "safe-zip-url")]
     pub safe_zip_url: Option<String>,
+
+    /// Directory for remote cache/materialization (required for remote ZIPs)
+    #[arg(long = "remote-cache-dir")]
+    pub remote_cache_dir: Option<PathBuf>,
 
     /// Explicit measurement URLs (VSICURL). Use with --polarization appropriately
     #[arg(long = "vv-url")]
@@ -93,6 +92,11 @@ pub struct CliArgs {
     pub hh_url: Option<String>,
     #[arg(long = "hv-url")]
     pub hv_url: Option<String>,
+
+    /// Phase 1 non-breaking additions below ---> TO BE WIRED ---> 
+    /// Load inputs from a STAC Item (local file path or HTTP URL)
+    #[arg(long = "stac-item")]
+    pub stac_item: Option<String>,
 
     /// Newline-separated list of inputs (STAC Items, SAFE ZIP URLs, local SAFE paths, or direct band URLs)
     #[arg(long = "input-list")]
@@ -113,10 +117,6 @@ pub struct CliArgs {
     /// Base backoff in milliseconds between retries
     #[arg(long = "http-backoff-ms", default_value_t = 500u64)]
     pub http_backoff_ms: u64,
-
-    /// Directory for remote cache/materialization (required for remote ZIPs)
-    #[arg(long = "remote-cache-dir")]
-    pub remote_cache_dir: Option<PathBuf>,
     
     /// Maximum number of concurrent entries to process when using --input-list
     #[arg(long = "max-concurrent")]
